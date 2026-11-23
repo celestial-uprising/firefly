@@ -1,5 +1,5 @@
 # Project Firefly: Podman
-# Fedora 44 + AOCCv6 Builder
+# Fedora 44 + Zen3+ Builder
 FROM fedora:44 AS builder
 
 RUN dnf install -y \

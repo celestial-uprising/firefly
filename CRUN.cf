@@ -1,5 +1,5 @@
 # Project Firefly: Crun
-# Fedora 44 + AOCCv6 Builder
+# Fedora 44 + Zen3+ Builder
 FROM fedora:44 AS builder
 RUN dnf install -y \
     git make cmake ninja-build meson autoconf automake libtool \
