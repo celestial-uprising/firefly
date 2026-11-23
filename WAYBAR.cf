@@ -1,17 +1,54 @@
 # Project Firefly: Waybar
-# Fedora 44 + Zen3+ Builder
+# Fedora 44 + Zen3+ Builder (AOCC v6)
 FROM fedora:44 AS builder
 RUN dnf install -y \
-    git make cmake ninja-build meson autoconf automake libtool \
-    pkgconf-pkg-config bison flex gperf texinfo nasm glibc-devel \
-    libstdc++-devel autoconf automake gcc git-core glibc-static \
-    libcap-devel libseccomp-devel libtool make pkg-config python \
-    python-libmount systemd-devel json-c-devel libquadmath ncurses \
+    git \
+    make \
+    cmake \
+    ninja-build \
+    meson \
+    pkgconf-pkg-config \
+    scdoc \
+    gobject-introspection-devel \
+    python3-packaging \
+    gcc-c++ \
+    glibc-devel \
+    libstdc++-devel \
+    lld \
+    libquadmath \
+    ncurses \
+    'pkgconfig(date)' \
+    'pkgconfig(dbusmenu-gtk3-0.4)' \
+    'pkgconfig(fmt)' \
+    'pkgconfig(gdk-pixbuf-2.0)' \
+    'pkgconfig(gio-unix-2.0)' \
+    'pkgconfig(gtk-layer-shell-0)' \
+    'pkgconfig(gtkmm-3.0)' \
+    'pkgconfig(jsoncpp)' \
+    'pkgconfig(libgps)' \
+    'pkgconfig(libinput)' \
+    'pkgconfig(libmpdclient)' \
+    'pkgconfig(libnl-3.0)' \
+    'pkgconfig(libnl-genl-3.0)' \
+    'pkgconfig(libpipewire-0.3)' \
+    'pkgconfig(libudev)' \
+    'pkgconfig(playerctl)' \
+    'pkgconfig(sigc++-2.0)' \
+    'pkgconfig(spdlog)' \
+    'pkgconfig(systemd)' \
+    'pkgconfig(upower-glib)' \
+    'pkgconfig(wayland-client)' \
+    'pkgconfig(wayland-cursor)' \
+    'pkgconfig(wayland-protocols)' \
+    'pkgconfig(wireplumber-0.5)' \
+    'pkgconfig(xkbregistry)' \
     && dnf clean all
+
 COPY aocc-v6/aocc* /tmp/
 RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
     rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
     rm -f /tmp/aocc*
+
 ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
 ENV PATH="${AOCC_DIR}/bin:${PATH}"
 ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
@@ -29,19 +66,31 @@ ENV CC="aoc" \
     CMAKE_BUILD_PARALLEL_LEVEL="16" \
     NINJA_STATUS="[%f/%t] "
 
-ENV CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    LDFLAGS="-fuse-ld=lld -flto -Wl,-O3,--gc-sections,--as-needed -l:libamdlibm.a"
+ENV GCC_DIR="/usr/lib/gcc/x86_64-redhat-linux/16"
+ENV CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fveclib=AMDLIBM --gcc-install-dir=${GCC_DIR}" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fveclib=AMDLIBM --gcc-install-dir=${GCC_DIR}" \
+    LDFLAGS="-fuse-ld=lld -flto -Wl,-O3,--gc-sections,--as-needed -L${GCC_DIR} -l:libamdlibm.a"
 
 FROM builder AS compiler
 WORKDIR /build
 RUN mkdir -p /out/bin /out/lib64 /out/share
 
 RUN git clone https://github.com/Alexays/Waybar && \
-    meson setup Waybar/build Waybar \
+    (meson setup Waybar/build Waybar \
         --prefix=/out \
         --buildtype=release \
-        -Db_lto=true && \
+        -Db_lto=true \
+        -Dcava=disabled \
+        -Dpipewire=enabled \
+        -Dpulseaudio=disabled \
+        -Djack=disabled \
+        -Dsndio=disabled \
+        -Dlibevdev=disabled \
+        -Dtests=disabled || ( \
+            echo "=== libstdc++ locations ===" && find /usr -name "libstdc++.so*" 2>/dev/null; \
+            echo "=== aoc++ -v probe ===" && printf 'int main(){return 0;}\n' | aoc++ -v -x c++ - $CXXFLAGS $LDFLAGS -o /tmp/probe 2>&1 || true; \
+            cat Waybar/build/meson-logs/meson-log.txt && exit 1 \
+        )) && \
     ninja -C Waybar/build install && \
     llvm-strip --strip-unneeded /out/bin/*
 
