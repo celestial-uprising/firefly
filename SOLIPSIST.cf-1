@@ -1,0 +1,31 @@
+# Project Firefly: Solipsist
+# Fedora 44 + Zen3+ Builder
+FROM fedora:44 AS builder
+RUN dnf install -y \
+    git \
+    curl \
+    xz \
+    tar \
+    llvm \
+    perl-Digest-SHA \
+    && dnf clean all
+
+ENV BUN_INSTALL="/root/.bun" \
+    PATH="/root/.bun/bin:${PATH}" \
+    MAKEFLAGS="-j16" \
+    RAYON_NUM_THREADS="16"
+
+RUN curl -fsSL "https://bun.sh/install" | bash && \
+    bun --version
+
+FROM builder AS compiler
+WORKDIR /build
+RUN mkdir -p /out/usr/bin /out/usr/lib/solipsist
+
+
+RUN git clone https://github.com/pulkitsharma07/solipsist.git /build/solipsist
+WORKDIR /build/solipsist
+
+
+FROM scratch AS export
+COPY --from=compiler /out/ /
