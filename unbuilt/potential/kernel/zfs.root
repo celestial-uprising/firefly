@@ -1,0 +1,61 @@
+To wire a custom-compiled kernel (vmlinuz-<KVER>) and built-in OpenZFS (CONFIG_ZFS=y) into a bootc container image on Fedora 44, place the kernel image and modules under /usr/lib/modules/<KVER>/, install ZFS userspace utilities (zpool, zfs, /etc/hostid), generate an initramfs (initrd.img) inside /usr/lib/modules/<KVER>/initramfs.img with dracut so bootc can boot it cleanly, and keep a fallback kernel in case early boot hits a snag.How bootc and dracut Expect a Custom Kernel + ZFSModule directory layout (bootc / OSTree): bootc looks for kernels under /usr/lib/modules/<KVER>/—specifically vmlinuz (or vmlinuz-<KVER>), System.map (optional/helpful), and initramfs.img inside /usr/lib/modules/<KVER>/. Putting vmlinuz in /boot/ alone inside a bootc container image is not how OSTree/bootc stages deployment kernels.Built-in ZFS (CONFIG_ZFS=y) + dracut: Because ZFS is built into vmlinuz, you do not need a zfs.ko kernel module in the initramfs, but if your root filesystem (or /var / pool import at boot) uses ZFS, the initramfs still needs ZFS userspace binaries (zpool, zfs, mount.zfs), udev rules, and /etc/hostid so zpool import can match the pool's host ID.Host ID (zgenhostid): ZFS pools record a 32-bit host ID. Make sure /etc/hostid exists in the bootc image (or is generated/copied consistently) so pools import cleanly without host-mismatch warnings or failures.Wiring Kernel, ZFS Userspace, and dracut Into a bootc Image1.Stage Kernel, Modules, and ZFS Userspace:In your bootc Containerfile.Copy your custom kernel artifacts from /out into /usr/lib/modules/${KVER}/ (renaming or copying the kernel image to /usr/lib/modules/${KVER}/vmlinuz), copy ZFS userspace binaries/libraries/udev rules from /out/usr/local, and ensure /etc/hostid and dracut are installed.Verification: Run ls -la /usr/lib/modules/${KVER}/vmlinuz and command -v zpool zfs inside the build stage to confirm both are in place.2.Generate initramfs.img With dracut:During container build.Run dracut --no-hostonly --kver "${KVER}" --force "/usr/lib/modules/${KVER}/initramfs.img" (adding --install /sbin/zpool\ /sbin/zfs\ /etc/hostid or ZFS dracut module support if mounting ZFS in initramfs) so the initramfs matches ${KVER} and contains needed userspace tools.Verification: Run lsinitrd "/usr/lib/modules/${KVER}/initramfs.img" | grep -E 'zpool|zfs|hostid' (when ZFS tools/hostid are included) and confirm dracut exits 0.3.Run bootc container lint and Keep a Fallback:Before pushing or booting.Run bootc container lint inside the container build to validate OSTree/bootc layout and kernel/initramfs placement, and keep a known-good fallback image/deployment available when testing on hardware.Verification: Confirm bootc container lint passes with zero fatal errors.Example bootc Containerfile SnippetDockerfileFROM quay.io/fedora/fedora-bootc:44 AS bootc-final
+
+# Copy custom kernel + ZFS userspace artifacts exported from your kernel builder stage
+COPY --from=kernel-zfs-export / /tmp/custom-out/
+
+RUN set -euo pipefail && \
+    KVER="$(basename "$(find /tmp/custom-out/lib/modules -mindepth 1 -maxdepth 1 -type d | head -n 1)")" && \
+    mkdir -p "/usr/lib/modules/${KVER}" && \
+    cp "/tmp/custom-out/boot/vmlinuz-${KVER}" "/usr/lib/modules/${KVER}/vmlinuz" && \
+    cp "/tmp/custom-out/boot/System.map-${KVER}" "/usr/lib/modules/${KVER}/System.map" && \
+    cp -a "/tmp/custom-out/lib/modules/${KVER}/." "/usr/lib/modules/${KVER}/" && \
+    cp -a /tmp/custom-out/usr/local/. /usr/local/ && \
+    rm -rf /tmp/custom-out && \
+    if ! command -v dracut >/dev/null 2>&1; then dnf install -y dracut && dnf clean all; fi && \
+    if [ ! -f /etc/hostid ]; then zgenhostid 0x00000000 2>/dev/null || true; fi && \
+    dracut --no-hostonly --kver "${KVER}" --force "/usr/lib/modules/${KVER}/initramfs.img" && \
+    depmod -a "${KVER}" && \
+    bootc container lint
+Practical Watch-OutsContainer build vs. target hardware: Using --no-hostonly when building initramfs.img inside a container avoids baking container-build hardware assumptions into the image, while still letting your Zen 3 / NVMe / amdgpu / ZFS drivers initialize at boot.ZFS root vs. non-root ZFS: Mounting a ZFS pool before sysroot pivots requires ZFS userspace (zpool, zfs, /etc/hostid) inside the initramfs and matching root=ZFS=... / bootc kargs.d configuration; importing ZFS pools after boot (zfs-import.service) is simpler if your bootc sysroot itself lives on ext4/btrfs/erofs.
+
+------------------------>
+
+Booting directly from a ZFS pool in bootc requires passing ZFS root kernel arguments via /usr/lib/bootc/kargs.d and bundling ZFS userspace tools, udev rules, /etc/hostid, and OpenZFS's dracut hooks into initramfs.img so the initramfs can import the pool and mount /sysroot before systemd pivots. Because CONFIG_ZFS=y is built directly into your kernel, the initramfs does not need zfs.ko, but it still depends on zpool, zfs, mount.zfs, and matching host/pool state.   1. Configuring /usr/lib/bootc/kargs.dbootc reads TOML kernel argument files from /usr/lib/bootc/kargs.d/ when building or staging deployments. For a ZFS root dataset (for example zroot/ROOT/fedora), set root=ZFS=... (or root=zfs:...) along with any required rw or IOMMU/hardware flags:   Ini, TOML# /usr/lib/bootc/kargs.d/10-zfs-root.toml
+kargs = [
+  "root=ZFS=zroot/ROOT/fedora",
+  "rw"
+]
+Note: Make sure the target ZFS dataset has mountpoint=/ and that the pool's bootfs property (if used) matches your root dataset. If you use encrypted ZFS datasets or zpool.cache, also pass any corresponding ZFS dracut kernel parameters (zfs_force=1, spl_hostid=..., or rootdelay=...) if needed by your pool layout.2. Wiring initramfs.img With dracut and Built-In ZFS1.Add the ZFS Root kargs.d Drop-In:Inside your bootc Containerfile.Create /usr/lib/bootc/kargs.d/10-zfs-root.toml inside the bootc image stage with your root=ZFS=<pool/dataset> entry.Verification: Run cat /usr/lib/bootc/kargs.d/10-zfs-root.toml in the build stage to confirm valid TOML syntax and the exact dataset path.2.Install ZFS Userspace, udev Rules, and /etc/hostid:Before running dracut.Ensure zpool, zfs, mount.zfs, ZFS udev rules, ZFS dracut module files (90zfs if shipped with your OpenZFS build), and /etc/hostid exist in the image.Verification: Check command -v zpool zfs mount.zfs and test -f /etc/hostid before generating the initramfs.3.Build initramfs.img With dracut:For target kernel version ${KVER}.Run dracut --no-hostonly --kver "${KVER}" --force "/usr/lib/modules/${KVER}/initramfs.img" (adding --add zfs if the OpenZFS dracut module is installed, or --install for zpool, zfs, mount.zfs, and /etc/hostid if assembling manually).Verification: Inspect the generated image with lsinitrd "/usr/lib/modules/${KVER}/initramfs.img" | grep -E 'zfs|zpool|hostid' to confirm ZFS binaries/hooks and /etc/hostid are present.4.Validate With bootc container lint:Before finalizing the image.Run bootc container lint inside the container build to verify kernel, module, initramfs.img, and kargs.d layout before exporting or booting.Verification: Confirm bootc container lint completes with exit code 0.Key Watch-Outs When Booting Root-on-ZFS With bootcHost ID consistency: If /etc/hostid in the image/initramfs does not match the host ID recorded on the ZFS pool, zpool import can block automatic import during early boot unless handled or overridden.Bootloader vs. ZFS pool: Standard UEFI/ESP (FAT32) or separate /boot partitions are still needed by firmware/bootloaders because most firmware/GRUB setups cannot read complex ZFS pools directly—even when the Linux kernel itself has CONFIG_ZFS=y.Fallback deployment: Keep a known-working fallback kernel/deployment ready so if a ZFS root dataset or dracut hook fails to import during early boot, you can roll back cleanly.
+
+------------------------>
+
+When building OpenZFS from source, ./configure and make install install the dracut module (90zfs) and udev rules automatically whenever dracut and udev directories are detected or explicitly passed via --with-dracutdir, --with-udevdir, and --with-udevruledir. In your earlier configure log, --with-config=user was used for the userspace stage, and OpenZFS already detected /usr/lib/dracut and /lib/udev;/lib/udev/rules.d—so explicitly passing those paths when configuring the userspace build ensures they land cleanly under DESTDIR=/out for your bootc stage.
+Configuring & Installing dracut and udev Files From Source
+1
+Verify Configure Flags for dracut and udev
+Inside /build/zfs
+
+Run ./configure --help | grep -E 'dracut|udev' in the OpenZFS source tree to confirm the exact flag names supported by your cloned OpenZFS version.
+Verification: Confirm --with-dracutdir, --with-udevdir, and --with-udevruledir appear in the help output.
+2
+Configure With Explicit dracut and udev Paths
+Userspace build step
+
+Pass --with-dracutdir=/usr/lib/dracut, --with-udevdir=/usr/lib/udev, and --with-udevruledir=/usr/lib/udev/rules.d to ./configure alongside --prefix=/usr/local and --with-config=user.
+Verification: Check the configure summary output to confirm dracut and udev paths match /usr/lib/... rather than falling back to /usr/local/... or being disabled.
+3
+Install Into DESTDIR=/out and Inspect Staged Files
+Staging to /out
+
+Run make -j16 && DESTDIR=/out make install, then verify the dracut module (90zfs) and ZFS udev rules were written under /out.
+Verification: Run find /out -path '*dracut*' -o -path '*udev*' to confirm 90zfs and the ZFS .rules files are present before copying /out into the bootc image.
+Practical Watch-Outs When Staging Into bootc
+
+    Prefix vs. system paths: OpenZFS binaries/libraries in your build go under /usr/local, while dracut and udev expect modules under /usr/lib/dracut/modules.d/90zfs and rules under /usr/lib/udev/rules.d/ (or /etc/udev/rules.d/). Always check where DESTDIR=/out make install places them so your bootc COPY lands in the right directory.
+
+    Built-in ZFS (CONFIG_ZFS=y) vs. installkernel hooks: Because ZFS is compiled directly into vmlinuz rather than built as zfs.ko, dracut does not need a kernel module file for zfs, but 90zfs and the udev rules still help coordinate device readiness, /etc/hostid, and pool import during early boot.
+
+    Enabling zfs in dracut: Installing 90zfs puts the module on disk; you still include it when generating initramfs.img (for example via --add zfs or a dracut.conf.d snippet) and run bootc container lint afterward.
+
+
+

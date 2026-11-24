@@ -1,26 +1,24 @@
-# Project Firefly: mgba (Zen3+ / AOCC 6.0)
-# Fedora 44 Builder
+# Project Firefly: mGBA (Qt UI + Stock Shaders/Filters, No FFmpeg) on Fedora 44 + AOCC 6.0 (Zen 3)
 FROM fedora:44 AS builder
 
 RUN dnf install -y \
   git \
+  cmake \
+  ninja-build \
   gcc \
   gcc-c++ \
   libstdc++-devel \
-  cmake \
-  ninja-build \
+  make \
   pkgconf-pkg-config \
-  libzip-devel \
+  qt6-qtbase-devel \
+  qt6-qtmultimedia-devel \
+  mesa-libGL-devel \
+  SDL2-devel \
   libpng-devel \
   zlib-devel \
   sqlite-devel \
-  SDL2-devel \
-  libepoxy-devel \
-  mesa-libGL-devel \
+  libzip-devel \
   libedit-devel \
-  lua-devel \
-  libquadmath \
-  ncurses \
   && dnf clean all
 
 COPY aocc-v6/aocc* /tmp/
@@ -29,11 +27,11 @@ RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
     rm -f /tmp/aocc*
 
 ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
-ENV PATH="${AOCC_DIR}/bin:${PATH}"
-ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
-ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
-ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
-ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
 
 ENV CC="aoc" \
     CXX="aoc++" \
@@ -41,25 +39,26 @@ ENV CC="aoc" \
     RANLIB="llvm-ranlib" \
     NM="llvm-nm" \
     STRIP="llvm-strip" \
-    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM" \
     LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
 
 FROM builder AS compiler
-WORKDIR /build/mgba
 
-RUN git clone --depth 1 https://github.com/mgba-emu/mgba.git . && \
-    cmake -B build -G Ninja \
+WORKDIR /build/mgba
+RUN git clone --depth 1 https://github.com/mgba-emu/mgba.git .
+
+RUN cmake -S . -B build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=/usr/local \
-      -DCMAKE_C_COMPILER=aoc \
-      -DCMAKE_CXX_COMPILER=aoc++ \
-      -DCMAKE_AR=/opt/AMD/aocc-compiler-6.0.0/bin/llvm-ar \
-      -DCMAKE_RANLIB=/opt/AMD/aocc-compiler-6.0.0/bin/llvm-ranlib \
-      -DBUILD_QT=OFF && \
-    ninja -C build -j16 && \
-    DESTDIR=/out ninja -C build install && \
-    find /out/usr/local/bin /out/usr/local/lib* -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+      -DBUILD_QT=ON \
+      -DBUILD_SDL=OFF \
+      -DUSE_FFMPEG=OFF \
+      -DUSE_OPENGL=ON && \
+    cmake --build build -j16 && \
+    DESTDIR=/out cmake --install build && \
+    find /out/usr/local/bin /out/usr/local/lib* -type f \
+      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

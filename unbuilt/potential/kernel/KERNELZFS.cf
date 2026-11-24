@@ -75,32 +75,60 @@ RUN git clone --depth 1 --branch v7.2.15 https://git.kernel.org/pub/scm/linux/ke
     rustup default "${RUST_VER}" && \
     rustup component add rust-src --toolchain "${RUST_VER}"
 
-WORKDIR /build/zfs
-RUN git clone --depth 1 https://github.com/openzfs/zfs.git .
+# Optional custom kernel config fragment/base placed in build context at kconfig/custom.config
+COPY kconfig* /tmp/kconfig/
 
-# 1. Configure OpenZFS builtin, copy into Linux tree, then build Rust-enabled kernel
+WORKDIR /build/linux
+RUN if [ -f /tmp/kconfig/custom.config ]; then \
+      cp /tmp/kconfig/custom.config .config; \
+    else \
+      make LLVM=1 defconfig; \
+    fi && \
+    scripts/config --enable CONFIG_MODULES && \
+    make LLVM=1 olddefconfig && \
+    make LLVM=1 rustavailable && \
+    make LLVM=1 prepare && \
+    make LLVM=1 modules_prepare
+
 WORKDIR /build/zfs
-RUN sh autogen.sh && \
+RUN git clone --depth 1 https://github.com/openzfs/zfs.git . && \
+    sh autogen.sh && \
     ./configure \
+      LLVM=1 \
       --with-linux=/build/linux \
       --with-linux-obj=/build/linux \
       --enable-linux-builtin && \
     ./copy-builtin /build/linux
 
+# 1. Finalize Kconfig with ZFS injected and build Rust-enabled kernel
 WORKDIR /build/linux
-RUN make LLVM=1 defconfig && \
-    make LLVM=1 rustavailable && \
-    scripts/config --enable CONFIG_RUST \
+RUN scripts/config \
+      --enable CONFIG_MODULES \
+      --enable CONFIG_RUST \
       --enable CONFIG_ZFS \
+      --enable CONFIG_EROFS_FS \
+      --enable CONFIG_OVERLAY_FS \
+      --enable CONFIG_BLK_DEV_LOOP \
+      --enable CONFIG_CGROUPS \
+      --enable CONFIG_NAMESPACES \
+      --enable CONFIG_SECCOMP \
+      --enable CONFIG_EFI \
+      --enable CONFIG_EFI_STUB \
+      --enable CONFIG_EFIVAR_FS \
       --enable CONFIG_EFI_PARTITION \
       --enable CONFIG_BLOCK \
+      --enable CONFIG_AMD_IOMMU \
+      --enable CONFIG_NVME_CORE \
+      --enable CONFIG_BLK_DEV_NVME \
+      --enable CONFIG_DRM \
+      --enable CONFIG_DRM_AMDGPU \
       --enable CONFIG_ZLIB_INFLATE \
       --enable CONFIG_ZLIB_DEFLATE \
       --enable CONFIG_CRYPTO_CRC32C_INTEL \
       --enable CONFIG_CRYPTO_SHA256 \
       --enable CONFIG_CRYPTO_SHA512 && \
     make LLVM=1 olddefconfig && \
-    grep -E '^CONFIG_(RUST|ZFS)=' .config && \
+    grep -E '^CONFIG_(MODULES|RUST|ZFS|EROFS_FS|OVERLAY_FS|EFIVAR_FS|AMD_IOMMU)=' .config && \
     make LLVM=1 \
       KCFLAGS="-O3 -march=znver3 -mtune=znver3" \
       KBUILD_LDFLAGS="-fuse-ld=lld" \
