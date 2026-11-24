@@ -1,0 +1,62 @@
+# Project Firefly: Narayanastra
+# Fedora 44 + Zen3+ Builder (musl)
+FROM fedora:44 AS builder
+RUN dnf install -y \
+  git \
+  gcc \
+  musl-devel \
+  musl-gcc \
+  pkgconf-pkg-config \
+  libquadmath \
+  ncurses \
+  && dnf clean all
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}"
+ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
+ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
+ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+ENV RUSTUP_HOME="/usr/local/rustup"
+ENV CARGO_HOME="/usr/local/cargo"
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain nightly --profile minimal && \
+    rustup component add rust-src --toolchain nightly && \
+    rustup target add x86_64-unknown-linux-musl --toolchain nightly
+ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-musl" \
+    CARGO_BUILD_JOBS="16" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="aoc" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-cpu=znver3 -C link-arg=-fuse-ld=lld -C link-arg=-l:libamdlibm.a -Z threads=16" \
+    CARGO_UNSTABLE_BUILD_STD="std,panic_abort" \
+    CARGO_UNSTABLE_PROFILE_RUSTFLAGS="true" \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL="3" \
+    CARGO_PROFILE_RELEASE_LTO="fat" \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS="1" \
+    CARGO_PROFILE_RELEASE_PANIC="abort" \
+    CARGO_PROFILE_RELEASE_STRIP="symbols" \
+    CC="aoc" \
+    CXX="aoc++" \
+    AR="llvm-ar" \
+    NM="llvm-nm" \
+    RANLIB="llvm-ranlib" \
+    STRIP="llvm-strip" \
+    LD="ld.lld" \
+    MAKEFLAGS="-j16" \
+    CMAKE_BUILD_PARALLEL_LEVEL="16" \
+    NINJA_STATUS="[%f/%t] " \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto -Wl,-O3,--gc-sections,--as-needed -l:libamdlibm.a"
+
+FROM builder AS compiler
+WORKDIR /build
+RUN git clone --depth=1 https://github.com/Tekush1/narayanastra.git && \
+    cargo build --release --target x86_64-unknown-linux-musl --manifest-path narayanastra/Cargo.toml && \
+    install -Dm755 narayanastra/target/x86_64-unknown-linux-musl/release/narayanastra /out/usr/local/bin/narayanastra
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

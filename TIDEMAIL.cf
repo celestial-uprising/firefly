@@ -24,7 +24,7 @@ ENV GOPATH="/go" \
     GOOS="linux" \
     GOARCH="amd64" \
     GOAMD64="v3" \
-    CGO_ENABLED="0" \
+    CGO_ENABLED="1" \
     CC="aoc" \
     CXX="aoc++" \
     CGO_CFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
@@ -33,6 +33,6 @@ ENV GOPATH="/go" \
 RUN mkdir -p /out/bin
 FROM builder AS compiler
 WORKDIR /build
-RUN go install -trimpath -ldflags="-s -w" github.com/allisonhere/tidemail.git
+RUN go install -trimpath -ldflags="-s -w" github.com/allisonhere/tidemail@latest
 FROM scratch AS export
 COPY --from=compiler /out/bin/ /usr/bin/
