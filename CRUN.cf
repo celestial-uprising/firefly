@@ -48,8 +48,4 @@ RUN git clone --depth 1 https://github.com/containers/crun.git && \
 RUN rm -rf /out/include /out/lib64/pkgconfig /out/lib64/*.a /out/lib/*.a
 
 FROM scratch AS export
-COPY --from=compiler /out/bin/ /usr/bin/
-COPY --from=compiler /out/lib64/ /usr/local/lib64/
-COPY --from=compiler /out/share/ /usr/share/
-# Uncomment below if any of your C projects install shared libraries (.so) or manpages/data:
-
+COPY --from=compiler /out/ /

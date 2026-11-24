@@ -68,4 +68,4 @@ RUN PKG_CONFIG_PATH="" \
     ls -la /out/bin
 
 FROM scratch AS export
-COPY --from=compiler /out/bin/ /usr/bin/
+COPY --from=compiler /out/ /

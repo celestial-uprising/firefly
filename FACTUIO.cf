@@ -54,4 +54,4 @@ RUN mkdir -p /out && \
     rm -rf /out/.crates.toml /out/.crates2.json
 
 FROM scratch AS export
-COPY --from=compiler /out/bin/ /usr/bin/
+COPY --from=compiler /out/ /

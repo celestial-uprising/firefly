@@ -63,10 +63,17 @@ WORKDIR /build/Pi-Bolt
 # COPY plugins.json /build/Pi-Bolt/plugins.json
 # COPY workers/worker1.js /build/Pi-Bolt/workers/worker1.js
 
+ENV PROFILE_DIR="/build/Pi-Bolt/profiles/custom"
+
 RUN bash scripts/fetch-runtime.sh && \
     bash scripts/prepare-pi.sh && \
+    bash scripts/train-profile.sh \
+        --plugins /build/Pi-Bolt/plugins.json \
+        --out "${PROFILE_DIR}" && \
     bash scripts/build-pi.sh \
         --cpu native \
+        --jit on \
+        --profile "${PROFILE_DIR}" \
         --plugins /build/Pi-Bolt/plugins.json \
         --plugin-worker /build/Pi-Bolt/workers/worker1.js && \
     cp -a out/pi-bolt/. /out/usr/lib/pi-bolt/ && \

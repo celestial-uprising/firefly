@@ -3,6 +3,10 @@
 FROM fedora:44 AS builder
 RUN dnf install -y \
   fontconfig-devel \
+  libxkbcommon-devel \
+  libxkbcommon-x11-devel \
+  libxcb-devel \
+  freetype-devel \
   git \
   gcc \
   pkgconf-pkg-config \
@@ -55,4 +59,4 @@ RUN mkdir -p /out && \
     rm -rf /out/.crates.toml /out/.crates2.json
 
 FROM scratch AS export
-COPY --from=compiler /out/bin/ /usr/bin/
+COPY --from=compiler /out/ /

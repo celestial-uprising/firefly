@@ -35,4 +35,4 @@ FROM builder AS compiler
 WORKDIR /build
 RUN go install -trimpath -ldflags="-s -w" github.com/allisonhere/tidemail@latest
 FROM scratch AS export
-COPY --from=compiler /out/bin/ /usr/bin/
+COPY --from=compiler /out/ /

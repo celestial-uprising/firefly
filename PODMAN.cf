@@ -62,9 +62,4 @@ RUN git clone --depth 1 https://github.com/containers/podman.git . && \
   find /out/usr -maxdepth 4
 
 FROM scratch AS export
-COPY --from=compiler /out/usr/bin/ /usr/bin/
-COPY --from=compiler /out/usr/libexec/ /usr/libexec/
-COPY --from=compiler /out/usr/lib/ /usr/lib/
-COPY --from=compiler /out/usr/share/man/ /usr/share/man/
-COPY --from=compiler /out/usr/share/bash-completion/ /usr/share/bash-completion/
-COPY --from=compiler /out/usr/share/zsh/ /usr/share/zsh/
+COPY --from=compiler /out/ /
