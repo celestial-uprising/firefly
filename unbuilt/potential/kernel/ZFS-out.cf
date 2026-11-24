@@ -1,0 +1,96 @@
+# Project Firefly: Upstream Linux + Upstream OpenZFS (Zen3+ / AOCC 6.0)
+# Fedora 44 Builder
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  make \
+  autoconf \
+  automake \
+  libtool \
+  bc \
+  bison \
+  flex \
+  perl \
+  python3 \
+  openssl-devel \
+  zlib-devel \
+  libblkid-devel \
+  libuuid-devel \
+  libtirpc-devel \
+  libudev-devel \
+  libaio-devel \
+  elfutils-libelf-devel \
+  dwarves \
+  kmod \
+  which \
+  pkgconf-pkg-config \
+  libquadmath \
+  ncurses-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}"
+ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
+ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
+ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
+
+FROM builder AS compiler
+
+# 1. Build upstream Linux kernel
+WORKDIR /build/linux
+RUN git clone --depth 1 https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git . && \
+    make LLVM=1 defconfig && \
+    scripts/config --enable CONFIG_ZFS \
+      --enable CONFIG_CRYPTO_CRC32C_INTEL \
+      --enable CONFIG_CRYPTO_SHA256 \
+      --enable CONFIG_CRYPTO_SHA512 || true && \
+    make LLVM=1 olddefconfig && \
+    make LLVM=1 \
+      KCFLAGS="-O3 -march=znver3 -mtune=znver3" \
+      KBUILD_LDFLAGS="-fuse-ld=lld" \
+      -j16 && \
+    KVER="$(make -s LLVM=1 kernelrelease)" && \
+    mkdir -p /out/boot /out/usr/src/linux-headers-${KVER} && \
+    cp arch/x86/boot/bzImage "/out/boot/vmlinuz-${KVER}" && \
+    cp System.map "/out/boot/System.map-${KVER}" && \
+    cp .config "/out/boot/config-${KVER}" && \
+    make LLVM=1 INSTALL_MOD_PATH=/out modules_install && \
+    make LLVM=1 INSTALL_HDR_PATH=/out/usr/local headers_install
+
+# 2. Build upstream OpenZFS against the kernel tree just compiled
+WORKDIR /build/zfs
+RUN git clone --depth 1 https://github.com/openzfs/zfs.git . && \
+    sh autogen.sh && \
+    ./configure \
+      --prefix=/usr/local \
+      --with-linux=/build/linux \
+      --with-linux-obj=/build/linux \
+      --with-config=all && \
+    make -j16 && \
+    DESTDIR=/out make install && \
+    depmod -b /out "$(make -s -C /build/linux LLVM=1 kernelrelease)" 2>/dev/null || true && \
+    find /out/usr/local/bin /out/usr/local/sbin /out/usr/local/lib* -type f \
+      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

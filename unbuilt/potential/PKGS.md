@@ -4,7 +4,7 @@
 
 ### Phase 0 
 
---> ffmpeg -> mpv
+--> ffmpeg -> libplacebo -> mpv
 
 --> gtk4 -> gtk4-layer-shell -> clapper -> loupe -> nautilus
 
