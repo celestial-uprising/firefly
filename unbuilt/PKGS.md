@@ -2,41 +2,9 @@
 
 ## Upcoming Packages List
 
-### Phase 1
-
-- zoxide
-- bat 
-- eza 
-- fd-find 
-- fzf 
-- gdu 
-- ncdu 
-- gh 
-- git 
-- ov 
-- dunst
-- pastel
-- pdfgrep
-
-### Phase 2
-
-- lm_sensors 
-- s-tui
-- btop 
-- powertop
-- radeontop
-- nvtop 
-- mpv 
-- remmina
-- zathura
-- zathura-plugins-all
-- luarocks 
-- neovim 
-- tree-sitter-cli
-- vim
-
 ### Phase 3
 
+- vim
 - distrobox
 - flatpak
 - buildah

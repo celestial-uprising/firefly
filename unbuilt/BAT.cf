@@ -1,6 +1,7 @@
-# Project Firefly: Diffie
+# Project Firefly: bat
 # Fedora 44 + Zen3+ Builder
 FROM fedora:44 AS builder
+
 RUN dnf install -y \
   git \
   gcc \
@@ -8,22 +9,27 @@ RUN dnf install -y \
   libquadmath \
   ncurses \
   && dnf clean all
+
 COPY aocc-v6/aocc* /tmp/
 RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
     rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
     rm -f /tmp/aocc*
+
 ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
 ENV PATH="${AOCC_DIR}/bin:${PATH}"
 ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
 ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
 ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
 ENV RUSTUP_HOME="/usr/local/rustup"
 ENV CARGO_HOME="/usr/local/cargo"
 ENV PATH="/usr/local/cargo/bin:${PATH}"
+
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --default-toolchain nightly --profile minimal && \
     rustup component add rust-src --toolchain nightly
+
 ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
     CARGO_BUILD_JOBS="16" \
     CARGO_INSTALL_ROOT="/out" \
@@ -50,8 +56,8 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
 FROM builder AS compiler
 WORKDIR /build
 RUN mkdir -p /out && \
-    cargo install --locked --git https://github.com/sassman/diffie-rs diffie && \
+    cargo install --locked --git https://github.com/sharkdp/bat bat && \
     rm -rf /out/.crates.toml /out/.crates2.json
 
 FROM scratch AS export
-COPY --from=compiler /out/bin/ /usr/bin/
+COPY --from=compiler /out/ /
