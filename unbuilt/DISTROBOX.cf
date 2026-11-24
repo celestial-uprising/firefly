@@ -1,0 +1,20 @@
+# Project Firefly: distrobox
+# Fedora 44 Builder
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git \
+  bash \
+  coreutils \
+  findutils \
+  && dnf clean all
+
+FROM builder AS compiler
+WORKDIR /build/distrobox
+
+RUN git clone --depth 1 https://github.com/89luca89/distrobox.git . && \
+    mkdir -p /out/usr/bin /out/usr/share/man/man1 /out/usr/share/bash-completion/completions /out/usr/share/zsh/site-functions && \
+    ./install -P /out/usr
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

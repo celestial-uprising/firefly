@@ -1,0 +1,65 @@
+# Project Firefly: wget (Zen3+ / AOCC 6.0)
+# Fedora 44 Builder
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  curl \
+  tar \
+  xz \
+  make \
+  gcc \
+  gettext \
+  pkgconf-pkg-config \
+  openssl-devel \
+  zlib-devel \
+  libidn2-devel \
+  libpsl-devel \
+  pcre2-devel \
+  libuuid-devel \
+  gpgme-devel \
+  libmetalink-devel \
+  c-ares-devel \
+  libquadmath \
+  ncurses \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}"
+ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
+ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
+ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
+
+FROM builder AS compiler
+WORKDIR /build/wget
+
+RUN curl -fsSL https://ftp.gnu.org/gnu/wget/wget-latest.tar.gz -o wget.tar.gz && \
+    tar -xzf wget.tar.gz --strip-components=1 && \
+    ./configure \
+      --prefix=/usr \
+      --sysconfdir=/etc \
+      --with-ssl=openssl \
+      --with-libidn2 \
+      --with-libpsl \
+      --enable-pcre2 && \
+    make -j16 && \
+    make -j16 DESTDIR=/out install && \
+    llvm-strip --strip-unneeded /out/usr/bin/wget 2>/dev/null || true
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

@@ -1,0 +1,21 @@
+# Project Firefly: podman-compose
+# Fedora 44 Builder
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git \
+  python3 \
+  python3-pip \
+  python3-wheel \
+  python3-setuptools \
+  && dnf clean all
+
+FROM builder AS compiler
+WORKDIR /build/podman-compose
+
+RUN git clone --depth 1 https://github.com/containers/podman-compose.git . && \
+    pip install --no-build-isolation --no-deps --prefix=/usr --root=/out . && \
+    python3 -m compileall -o 2 /out/usr
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

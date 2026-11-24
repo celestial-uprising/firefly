@@ -1,0 +1,59 @@
+# Project Firefly: ccache (Zen3+ / AOCC 6.0)
+# Fedora 44 Builder
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git \
+  gcc \
+  cmake \
+  ninja-build \
+  pkgconf-pkg-config \
+  libzstd-devel \
+  hiredis-devel \
+  xxhash-devel \
+  fmt-devel \
+  libquadmath \
+  ncurses \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}"
+ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
+ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
+ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
+
+FROM builder AS compiler
+WORKDIR /build/ccache
+
+RUN git clone --depth 1 https://github.com/ccache/ccache.git . && \
+    cmake -B build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_C_COMPILER=aoc \
+      -DCMAKE_CXX_COMPILER=aoc++ \
+      -DCMAKE_AR=/opt/AMD/aocc-compiler-6.0.0/bin/llvm-ar \
+      -DCMAKE_RANLIB=/opt/AMD/aocc-compiler-6.0.0/bin/llvm-ranlib \
+      -DENABLE_TESTING=OFF \
+      -DENABLE_DOCUMENTATION=OFF && \
+    ninja -C build -j16 && \
+    DESTDIR=/out ninja -C build install && \
+    llvm-strip --strip-unneeded /out/usr/bin/ccache 2>/dev/null || true
+
+FROM scratch AS export
+COPY --from=compiler /out/ /
