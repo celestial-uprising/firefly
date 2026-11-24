@@ -20,6 +20,8 @@ RUN dnf install -y \
   libquadmath \
   ncurses \
   glibc-devel \
+  sqlite-devel \
+  shadow-utils-subid-devel \
   && dnf clean all
 
 COPY aocc-v6/aocc* /tmp/
@@ -48,8 +50,8 @@ FROM builder AS compiler
 WORKDIR /tmp/podman-src
 
 RUN git clone --depth 1 https://github.com/containers/podman.git . && \
-  make BUILDTAGS="selinux seccomp systemd" binaries docs && \
-  make BUILDTAGS="selinux seccomp systemd" \
+  make BUILDTAGS="selinux seccomp systemd libsqlite3" binaries docs && \
+  make BUILDTAGS="selinux seccomp systemd libsqlite3" \
     DESTDIR=/out \
     PREFIX=/usr \
     ETCDIR=/etc \
