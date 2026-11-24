@@ -50,7 +50,7 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
 FROM builder AS compiler
 WORKDIR /build
 RUN mkdir -p /out && \
-    cargo install --locked --git https://github.com/rmuxapp/rmux.git && \
+    cargo install --locked --git https://github.com/rmuxapp/rmux.git rmux-cli && \
     rm -rf /out/.crates.toml /out/.crates2.json
 
 FROM scratch AS export

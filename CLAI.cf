@@ -22,7 +22,9 @@ ENV PATH="${AOCC_DIR}/bin:${PATH}"
 ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
 
+
 ENV GOPATH="/go" \
+    GOTOOLCHAIN="auto" \
     GOBIN="/out/bin" \
     GOMAXPROCS="16" \
     GOOS="linux" \
