@@ -47,6 +47,9 @@ WORKDIR /build/skopeo
 RUN git clone --depth 1 https://github.com/containers/skopeo.git . && \
     make -j16 BUILDTAGS="libsqlite3" bin/skopeo docs && \
     make -j16 DESTDIR=/out PREFIX=/usr install-binary install-docs install-completions && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
     llvm-strip --strip-unneeded /out/usr/bin/skopeo 2>/dev/null || true
 
 FROM scratch AS export

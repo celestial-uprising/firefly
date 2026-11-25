@@ -59,6 +59,9 @@ RUN git clone --depth 1 https://github.com/containers/podman.git . && \
     install.man \
     install.systemd \
     install.completions && \
+  if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+    mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+  fi && \
   find /out/usr -maxdepth 4
 
 FROM scratch AS export

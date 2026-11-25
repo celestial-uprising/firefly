@@ -59,11 +59,15 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
 
 FROM builder AS compiler
 WORKDIR /build/bootc
-RUN mkdir /out
+RUN mkdir -p /out/usr/bin
 
 RUN git clone --depth 1 https://github.com/bootc-dev/bootc.git . && \
     cargo build --release --locked --bin bootc && \
-    make DESTDIR=/out PREFIX=/usr 
+    make DESTDIR=/out PREFIX=/usr && \
+    install -m 0755 "target/${CARGO_BUILD_TARGET}/release/bootc" /out/usr/bin/bootc && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

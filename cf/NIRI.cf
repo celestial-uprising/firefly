@@ -82,11 +82,11 @@ FROM builder AS compiler
 WORKDIR /build
 RUN git clone --depth=1 https://github.com/niri-wm/niri.git && \
     cargo build --release --locked --manifest-path niri/Cargo.toml && \
-    install -Dm755 niri/target/x86_64-unknown-linux-gnu/release/niri /out/bin/niri && \
-    install -Dm755 niri/resources/niri-session /out/bin/niri-session && \
-    install -Dm644 niri/resources/niri.desktop /out/share/wayland-sessions/niri.desktop && \
-    install -Dm644 niri/resources/niri-portals.conf /out/share/xdg-desktop-portal/niri-portals.conf && \
-    install -Dm644 niri/resources/niri.service /out/lib/systemd/user/niri.service && \
-    install -Dm644 niri/resources/niri-shutdown.target /out/lib/systemd/user/niri-shutdown.target
+    install -Dm755 niri/target/x86_64-unknown-linux-gnu/release/niri /out/usr/bin/niri && \
+    install -Dm755 niri/resources/niri-session /out/usr/bin/niri-session && \
+    install -Dm644 niri/resources/niri.desktop /out/usr/share/wayland-sessions/niri.desktop && \
+    install -Dm644 niri/resources/niri-portals.conf /out/usr/share/xdg-desktop-portal/niri-portals.conf && \
+    install -Dm644 niri/resources/niri.service /out/usr/lib/systemd/user/niri.service && \
+    install -Dm644 niri/resources/niri-shutdown.target /out/usr/lib/systemd/user/niri-shutdown.target
 FROM scratch AS export
-COPY --from=compiler /out /
+COPY --from=compiler /out/ /

@@ -67,7 +67,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no
 
 FROM builder AS compiler
 
-RUN mkdir -p /out/boot
+RUN mkdir -p /out/boot /out/usr/bin
 
 COPY kconfig/ /build/kconfig/
 
@@ -152,14 +152,19 @@ RUN make distclean 2>/dev/null || true && \
     LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a -Wl,--no-fatal-warnings" \
     ./configure \
       --prefix=/usr \
+      --sbindir=/usr/bin \
+      --libdir=/usr/lib64 \
       --with-linux=/build/linux \
       --with-linux-obj=/build/linux \
       --with-config=user && \
     make -j16 && \
     DESTDIR=/out make install && \
-    ( find /out/usr/bin /out/usr/sbin /out/usr/lib* -type f \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    ( find /out/usr/bin /out/usr/lib* -type f \
       \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true ) && \
-    test -x /out/usr/sbin/zfs
+    test -x /out/usr/bin/zfs
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

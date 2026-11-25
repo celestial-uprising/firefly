@@ -48,11 +48,13 @@ RUN git clone --depth 1 https://github.com/blueman-project/blueman.git . && \
     meson setup build \
       --buildtype=release \
       --prefix=/usr \
+      --bindir=bin \
+      --libdir=lib64 \
       --sysconfdir=/etc \
       -Dpolicykit=true && \
     ninja -C build -j16 && \
     DESTDIR=/out ninja -C build install && \
-    find /out/usr -name "*.so" -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+    find /out/usr -name "*.so*" -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

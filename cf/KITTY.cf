@@ -67,10 +67,13 @@ ENV GOPATH="/go" \
 
 FROM builder AS compiler
 WORKDIR /build/kitty
-RUN mkdir /out
+RUN mkdir -p /out/usr
 
 RUN git clone --depth 1 https://github.com/kovidgoyal/kitty.git . && \
     python3 setup.py linux-package --prefix=/out/usr --update-check-interval=0 && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
     find /out/usr/bin /out/usr/lib*/kitty -type f \( -name "*.so" -o -executable \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export

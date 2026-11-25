@@ -43,6 +43,7 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="aoc" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=znver3 -C link-arg=-fuse-ld=lld -C link-arg=-l:libamdlibm.a -Z threads=16" \
     CARGO_UNSTABLE_BUILD_STD="std,panic_abort" \
+    CARGO_UNSTABLE_PROFILE_RUSTFLAGS="true" \
     CARGO_PROFILE_RELEASE_OPT_LEVEL="3" \
     CARGO_PROFILE_RELEASE_LTO="fat" \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS="1" \
@@ -57,15 +58,15 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
 
 FROM builder AS compiler
 WORKDIR /build
-RUN mkdir -p /out/bin
+RUN mkdir -p /out/usr/bin
 
 RUN PKG_CONFIG_PATH="" \
     PKG_CONFIG_LIBDIR="/usr/lib64/pkgconfig:/usr/share/pkgconfig" \
     PKG_CONFIG_ALLOW_SYSTEM_CFLAGS="1" \
     PKG_CONFIG_ALLOW_SYSTEM_LIBS="1" \
-    cargo install --locked --root /out --git https://github.com/errorware/crow && \
-    rm -f /out/.crates.toml /out/.crates2.json && \
-    ls -la /out/bin
+    cargo install --locked --root /out/usr --git https://github.com/errorware/crow && \
+    rm -f /out/usr/.crates.toml /out/usr/.crates2.json && \
+    ls -la /out/usr/bin
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

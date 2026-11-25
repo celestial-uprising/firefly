@@ -52,6 +52,8 @@ RUN git clone --depth 1 --branch v7.387.0 https://github.com/haasn/libplacebo.gi
     meson setup build \
       --buildtype=release \
       --prefix=/usr \
+      --bindir=bin \
+      --libdir=lib64 \
       -Dvulkan=enabled \
       -Dglslang=enabled \
       -Dshaderc=enabled \

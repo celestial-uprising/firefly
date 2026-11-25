@@ -58,13 +58,18 @@ RUN git clone --depth 1 https://github.com/openzfs/zfs.git . && \
     LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a -Wl,--no-fatal-warnings" \
     ./configure \
       --prefix=/usr \
+      --sbindir=/usr/bin \
+      --libdir=/usr/lib64 \
       --with-config=user && \
     make -j16 && \
     DESTDIR=/out make install && \
-    find /out/usr/bin /out/usr/sbin /out/usr/lib* -type f \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    find /out/usr/bin /out/usr/lib* -type f \
       \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
-    test -x /out/usr/sbin/zfs && \
-    test -x /out/usr/sbin/zpool
+    test -x /out/usr/bin/zfs && \
+    test -x /out/usr/bin/zpool
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

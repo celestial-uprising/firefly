@@ -48,6 +48,9 @@ RUN git clone --depth 1 https://github.com/dquigles/terminal_gameboy.git . && \
     cargo build --release --locked 2>/dev/null || cargo build --release && \
     mkdir -p /out/usr/bin && \
     find target/release -maxdepth 1 -type f -executable ! -name "*.d" ! -name "*.so" -exec cp {} /out/usr/bin/ \; && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
     find /out/usr/bin -type f -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export

@@ -25,7 +25,7 @@ ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
 
 ENV GOPATH="/go" \
     GOTOOLCHAIN="auto" \
-    GOBIN="/out/bin" \
+    GOBIN="/out/usr/bin" \
     GOMAXPROCS="16" \
     GOOS="linux" \
     GOARCH="amd64" \
@@ -37,7 +37,7 @@ ENV GOPATH="/go" \
     CGO_CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
     CGO_LDFLAGS="-fuse-ld=lld -l:libamdlibm.a"
 
-RUN mkdir -p /out/bin
+RUN mkdir -p /out/usr/bin
 
 FROM builder AS compiler
 WORKDIR /build

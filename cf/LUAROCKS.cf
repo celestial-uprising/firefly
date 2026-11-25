@@ -37,9 +37,12 @@ ENV CC="aoc" \
 FROM builder AS compiler
 WORKDIR /build/luarocks
 RUN git clone --depth 1 https://github.com/luarocks/luarocks.git . && \
-    ./configure --prefix=/usr && \
+    ./configure --prefix=/usr --bindir=/usr/bin && \
     make -j16 build && \
-    make DESTDIR=/out install
+    make DESTDIR=/out install && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

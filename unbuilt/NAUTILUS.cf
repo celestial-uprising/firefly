@@ -1,6 +1,6 @@
 # Project Firefly: nautilus (Zen3+ / AOCC 6.0)
 # Fedora 44 Builder using ghcr.io/celestial-uprising/firefly:gtk4
-FROM ghcr.io/celestial-uprising/firefly:gtk4 AS gtk4-artifacts
+FROM ghcr.io/celestial-uprising/firefly:GTK4 AS gtk4-artifacts
 
 FROM fedora:44 AS builder
 

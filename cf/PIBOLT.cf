@@ -64,6 +64,9 @@ RUN bash scripts/fetch-runtime.sh && \
     bash scripts/build-pi.sh --cpu native && \
     cp -a out/pi-bolt/. /out/usr/lib/pi-bolt/ && \
     ln -sf /usr/lib/pi-bolt/pi /out/usr/bin/pi && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
     /out/usr/lib/pi-bolt/pi --version
 
 FROM scratch AS export

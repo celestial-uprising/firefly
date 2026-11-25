@@ -44,7 +44,12 @@ RUN git clone --depth 1 https://github.com/neovim/neovim.git . && \
     cmake --build .deps -j16 && \
     cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr && \
     cmake --build build -j16 && \
-    DESTDIR=/out cmake --install build
+    DESTDIR=/out cmake --install build && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    find /out/usr/bin /out/usr/lib* -type f \
+      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

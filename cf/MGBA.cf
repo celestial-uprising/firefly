@@ -57,7 +57,7 @@ RUN git clone --depth 1 https://github.com/mgba-emu/mgba.git .
 RUN mkdir -p /out && \
   cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX=/usr/ \
+  -DCMAKE_INSTALL_PREFIX=/usr \
   -DBUILD_QT=ON \
   -DBUILD_SDL=OFF \
   -DUSE_FFMPEG=OFF \
@@ -65,6 +65,9 @@ RUN mkdir -p /out && \
   -DSKIP_GIT=ON && \
   cmake --build build -j16 && \
   DESTDIR=/out cmake --install build && \
+  if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+    mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+  fi && \
   test -x /out/usr/bin/mgba-qt && \
   find /out/usr/bin /out/usr/lib* -type f \
     \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true

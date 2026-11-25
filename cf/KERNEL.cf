@@ -67,7 +67,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no
 
 FROM builder AS compiler
 
-RUN mkdir -p /out/boot
+RUN mkdir -p /out/boot /out/usr/bin
 
 COPY kconfig/ /build/kconfig/
 
@@ -126,7 +126,7 @@ RUN if [ -f /build/kconfig/custom.config ]; then \
     cp .config "/out/boot/config-${KVER}" && \
     make LLVM=1 INSTALL_MOD_PATH=/out modules_install && \
     depmod -b /out "${KVER}" 2>/dev/null || true && \
-    make LLVM=1 INSTALL_HDR_PATH=/out/usr/local headers_install
+    make LLVM=1 INSTALL_HDR_PATH=/out/usr headers_install
 
 RUN KVER="$(make -s -C /build/linux LLVM=1 kernelrelease)" && \
     test -n "${KVER}" && \
@@ -150,15 +150,20 @@ RUN make distclean 2>/dev/null || true && \
     CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM -fno-unwind-tables -fno-asynchronous-unwind-tables" \
     LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a -Wl,--no-fatal-warnings" \
     ./configure \
-      --prefix=/usr/local \
+      --prefix=/usr \
+      --sbindir=/usr/bin \
+      --libdir=/usr/lib64 \
       --with-linux=/build/linux \
       --with-linux-obj=/build/linux \
       --with-config=user && \
     make -j16 && \
     DESTDIR=/out make install && \
-    ( find /out/usr/local/bin /out/usr/local/sbin /out/usr/local/lib* -type f \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    ( find /out/usr/bin /out/usr/lib64 -type f \
       \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true ) && \
-    test -x /out/usr/local/sbin/zfs
+    test -x /out/usr/bin/zfs
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

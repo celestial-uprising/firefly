@@ -43,7 +43,7 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 
 ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
     CARGO_BUILD_JOBS="16" \
-    CARGO_INSTALL_ROOT="/out" \
+    CARGO_INSTALL_ROOT="/out/usr" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="aoc" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=znver3 -C link-arg=-fuse-ld=lld -C link-arg=-flto=full -C link-arg=-l:libamdlibm.a -Z threads=16" \
     CARGO_UNSTABLE_BUILD_STD="std,panic_abort" \
@@ -71,6 +71,9 @@ RUN git clone --depth 1 https://git.kernel.org/pub/scm/git/git.git /build/git &&
     make -j16 prefix=/usr NO_TCLTK=YesPlease DESTDIR=/out \
       CC="aoc" AR="llvm-ar" RANLIB="llvm-ranlib" \
       CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS}" install && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
     llvm-strip --strip-unneeded /out/usr/bin/git* 2>/dev/null || true
 
 FROM scratch AS export

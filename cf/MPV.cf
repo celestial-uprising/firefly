@@ -74,6 +74,8 @@ RUN git clone --depth 1 https://github.com/mpv-player/mpv.git . && \
     meson setup build \
       --buildtype=release \
       --prefix=/usr \
+      --bindir=bin \
+      --libdir=lib64 \
       -Dprefer_static=true \
       -Dwayland=enabled \
       -Dvulkan=enabled && \

@@ -35,17 +35,17 @@ ENV CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fsca
 
 FROM builder AS compiler
 WORKDIR /build
-RUN mkdir -p /out/bin /out/lib64 /out/share
+RUN mkdir -p /out/usr/bin /out/usr/lib64 /out/usr/share
 
 RUN git clone --depth 1 https://github.com/containers/crun.git && \
      cd crun && \
      ./autogen.sh && \
-     ./configure --prefix=/out && \
+     ./configure --prefix=/usr --sbindir=/usr/bin --libdir=/usr/lib64 && \
      make && \
-     make install && \
-     llvm-strip --strip-unneeded /out/bin/*
+     make DESTDIR=/out install && \
+     find /out/usr/bin -type f -executable -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
-RUN rm -rf /out/include /out/lib64/pkgconfig /out/lib64/*.a /out/lib/*.a
+RUN rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/lib64/*.a /out/usr/lib/*.a
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

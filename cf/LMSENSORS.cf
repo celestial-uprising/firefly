@@ -37,7 +37,10 @@ FROM builder AS compiler
 WORKDIR /build/lm-sensors
 RUN git clone --depth 1 https://github.com/lm-sensors/lm-sensors.git . && \
     make -j16 CC="aoc" PREFIX=/usr BUILD_STATIC_LIB=1 && \
-    make -j16 CC="aoc" PREFIX=/usr BUILD_STATIC_LIB=1 DESTDIR=/out install
+    make -j16 CC="aoc" PREFIX=/usr BUILD_STATIC_LIB=1 DESTDIR=/out install && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

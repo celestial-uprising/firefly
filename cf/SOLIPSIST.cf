@@ -23,6 +23,9 @@ WORKDIR /build/solipsist
 
 RUN bun install --production && \
     bun build --compile --minify --target=bun-linux-x64 src/index.ts --outfile /out/usr/bin/solipsist && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
     rm -rf /root/.bun/install/cache
 
 FROM scratch AS export

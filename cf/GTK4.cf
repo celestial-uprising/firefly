@@ -71,11 +71,14 @@ ENV CC="aoc" \
 
 FROM builder AS compiler
 WORKDIR /build/gtk
+RUN mkdir /out
 
 RUN git clone --depth 1 https://gitlab.gnome.org/GNOME/gtk.git . && \
     meson setup build \
       --buildtype=release \
       --prefix=/usr \
+      --bindir=bin \
+      --libdir=lib64 \
       -Dwayland-backend=true \
       -Dx11-backend=true \
       -Dvulkan=enabled \
