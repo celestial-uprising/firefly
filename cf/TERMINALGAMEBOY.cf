@@ -46,9 +46,9 @@ WORKDIR /build/terminal_gameboy
 
 RUN git clone --depth 1 https://github.com/dquigles/terminal_gameboy.git . && \
     cargo build --release --locked 2>/dev/null || cargo build --release && \
-    mkdir -p /out/usr/local/bin && \
-    find target/release -maxdepth 1 -type f -executable ! -name "*.d" ! -name "*.so" -exec cp {} /out/usr/local/bin/ \; && \
-    find /out/usr/local/bin -type f -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+    mkdir -p /out/usr/bin && \
+    find target/release -maxdepth 1 -type f -executable ! -name "*.d" ! -name "*.so" -exec cp {} /out/usr/bin/ \; && \
+    find /out/usr/bin -type f -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

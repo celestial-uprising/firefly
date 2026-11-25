@@ -41,7 +41,7 @@ ENV CC="aoc" \
 FROM builder AS compiler
 WORKDIR /build/powertop
 RUN git clone --depth 1 https://github.com/fenrus75/powertop.git . && \
-    meson setup build --buildtype=release --prefix=/usr/local && \
+    meson setup build --buildtype=release --prefix=/usr && \
     ninja -C build -j16 && \
     DESTDIR=/out ninja -C build install
 

@@ -1,0 +1,62 @@
+# Project Firefly: Rofi
+# Fedora 44 + Zen3+ Builder
+FROM fedora:44 AS builder
+RUN dnf install -y \
+  gcc \
+  libquadmath \
+  ncurses \
+  git \
+  meson \
+  ninja-build \
+  pkgconf-pkg-config \
+  flex \
+  bison \
+  check-devel \
+  glib2-devel \
+  pango-devel \
+  cairo-devel \
+  gdk-pixbuf2-devel \
+  libxkbcommon-devel \
+  wayland-devel \
+  wayland-protocols-devel \
+  && dnf clean all
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}"
+ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
+ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
+ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+ENV CC="aoc" \
+    CXX="aoc++" \
+    AR="llvm-ar" \
+    NM="llvm-nm" \
+    RANLIB="llvm-ranlib" \
+    STRIP="llvm-strip" \
+    LD="ld.lld" \
+    MAKEFLAGS="-j16" \
+    CMAKE_BUILD_PARALLEL_LEVEL="16" \
+    NINJA_STATUS="[%f/%t] "
+ENV CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto -Wl,-O3,--gc-sections,--as-needed -l:libamdlibm.a"
+FROM builder AS compiler
+WORKDIR /build
+RUN mkdir -p /out/bin /out/lib64 /out/share
+
+RUN git clone --recursive https://github.com/davatorium/rofi.git && \
+    meson setup rofi/build rofi \
+        --prefix=/out \
+        --buildtype=release \
+        --strip \
+        -Db_lto=true \
+        -Dwayland=enabled \
+        -Dxcb=disabled && \
+    ninja -C rofi/build install
+
+RUN rm -rf /out/include /out/lib64/pkgconfig /out/lib64/*.a /out/lib/*.a
+FROM scratch AS export
+COPY --from=compiler /out/ /

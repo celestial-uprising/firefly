@@ -48,7 +48,7 @@ WORKDIR /build/ffmpeg
 
 RUN git clone --depth 1 --branch release/8.0 https://git.ffmpeg.org/ffmpeg.git . && \
     ./configure \
-      --prefix=/usr/local \
+      --prefix=/usr \
       --cc=aoc \
       --cxx=aoc++ \
       --ld=aoc \
@@ -70,7 +70,7 @@ RUN git clone --depth 1 --branch release/8.0 https://git.ffmpeg.org/ffmpeg.git .
       --extra-ldflags="${LDFLAGS}" && \
     make -j16 && \
     make -j16 DESTDIR=/out install && \
-    llvm-strip --strip-unneeded /out/usr/local/bin/ffmpeg /out/usr/local/bin/ffprobe 2>/dev/null || true
+    llvm-strip --strip-unneeded /out/usr/bin/ffmpeg /out/usr/bin/ffprobe 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

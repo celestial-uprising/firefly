@@ -8,10 +8,16 @@ RUN dnf install -y \
   gcc \
   gcc-c++ \
   libstdc++-devel \
+  libquadmath \
+  libquadmath-devel \
+  ncurses \
+  ncurses-devel \
   make \
   pkgconf-pkg-config \
   qt6-qtbase-devel \
   qt6-qtmultimedia-devel \
+  qt6-qttools-devel \
+  qt6-linguist \
   mesa-libGL-devel \
   SDL2-devel \
   libpng-devel \
@@ -27,7 +33,7 @@ RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
     rm -f /tmp/aocc*
 
 ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
-ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+ENV PATH="/usr/lib64/qt6/bin:${AOCC_DIR}/bin:${PATH}" \
     LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
     LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
     C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
@@ -39,26 +45,29 @@ ENV CC="aoc" \
     RANLIB="llvm-ranlib" \
     NM="llvm-nm" \
     STRIP="llvm-strip" \
-    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM" \
-    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM" \
-    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3"
 
 FROM builder AS compiler
 
 WORKDIR /build/mgba
 RUN git clone --depth 1 https://github.com/mgba-emu/mgba.git .
 
-RUN cmake -S . -B build -G Ninja \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_INSTALL_PREFIX=/usr/local \
-      -DBUILD_QT=ON \
-      -DBUILD_SDL=OFF \
-      -DUSE_FFMPEG=OFF \
-      -DUSE_OPENGL=ON && \
-    cmake --build build -j16 && \
-    DESTDIR=/out cmake --install build && \
-    find /out/usr/local/bin /out/usr/local/lib* -type f \
-      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+RUN mkdir -p /out && \
+  cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr/ \
+  -DBUILD_QT=ON \
+  -DBUILD_SDL=OFF \
+  -DUSE_FFMPEG=OFF \
+  -DUSE_OPENGL=ON \
+  -DSKIP_GIT=ON && \
+  cmake --build build -j16 && \
+  DESTDIR=/out cmake --install build && \
+  test -x /out/usr/bin/mgba-qt && \
+  find /out/usr/bin /out/usr/lib* -type f \
+    \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

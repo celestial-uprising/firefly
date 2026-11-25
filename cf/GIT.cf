@@ -65,13 +65,13 @@ FROM builder AS compiler
 WORKDIR /build
 RUN git clone --depth 1 https://git.kernel.org/pub/scm/git/git.git /build/git && \
     cd /build/git && \
-    make -j16 prefix=/usr/local NO_TCLTK=YesPlease \
+    make -j16 prefix=/usr NO_TCLTK=YesPlease \
       CC="aoc" AR="llvm-ar" RANLIB="llvm-ranlib" \
       CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS}" && \
-    make -j16 prefix=/usr/local NO_TCLTK=YesPlease DESTDIR=/out \
+    make -j16 prefix=/usr NO_TCLTK=YesPlease DESTDIR=/out \
       CC="aoc" AR="llvm-ar" RANLIB="llvm-ranlib" \
       CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS}" install && \
-    llvm-strip --strip-unneeded /out/usr/local/bin/git* 2>/dev/null || true
+    llvm-strip --strip-unneeded /out/usr/bin/git* 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

@@ -36,7 +36,7 @@ FROM builder AS compiler
 WORKDIR /build/btop
 RUN git clone --depth 1 https://github.com/aristocratos/btop.git . && \
     make -j16 CXX="aoc++" STRIP=true && \
-    make PREFIX=/usr/local DESTDIR=/out install
+    make PREFIX=/usr DESTDIR=/out install
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

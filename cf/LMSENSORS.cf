@@ -36,8 +36,8 @@ ENV CC="aoc" \
 FROM builder AS compiler
 WORKDIR /build/lm-sensors
 RUN git clone --depth 1 https://github.com/lm-sensors/lm-sensors.git . && \
-    make -j16 CC="aoc" PREFIX=/usr/local BUILD_STATIC_LIB=1 && \
-    make -j16 CC="aoc" PREFIX=/usr/local BUILD_STATIC_LIB=1 DESTDIR=/out install
+    make -j16 CC="aoc" PREFIX=/usr BUILD_STATIC_LIB=1 && \
+    make -j16 CC="aoc" PREFIX=/usr BUILD_STATIC_LIB=1 DESTDIR=/out install
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

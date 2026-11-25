@@ -37,7 +37,7 @@ ENV CC="aoc" \
 FROM builder AS compiler
 WORKDIR /build/luarocks
 RUN git clone --depth 1 https://github.com/luarocks/luarocks.git . && \
-    ./configure --prefix=/usr/local && \
+    ./configure --prefix=/usr && \
     make -j16 build && \
     make DESTDIR=/out install
 

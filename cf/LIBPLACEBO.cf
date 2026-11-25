@@ -1,4 +1,4 @@
-# Project Firefly: libplacebo (v7.387.0, Zen3+ / AOCC 6.0)
+# Project Firefly: libPlacebo
 # Fedora 44 Builder
 FROM fedora:44 AS builder
 
@@ -51,7 +51,7 @@ RUN git clone --depth 1 --branch v7.387.0 https://github.com/haasn/libplacebo.gi
     git submodule update --init --recursive && \
     meson setup build \
       --buildtype=release \
-      --prefix=/usr/local \
+      --prefix=/usr \
       -Dvulkan=enabled \
       -Dglslang=enabled \
       -Dshaderc=enabled \
@@ -62,7 +62,7 @@ RUN git clone --depth 1 --branch v7.387.0 https://github.com/haasn/libplacebo.gi
       -Dtests=false && \
     ninja -C build -j16 && \
     DESTDIR=/out ninja -C build install && \
-    find /out/usr/local/lib* -type f -name "*.so*" -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+    find /out/usr/lib* -type f -name "*.so*" -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

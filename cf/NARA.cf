@@ -56,7 +56,7 @@ FROM builder AS compiler
 WORKDIR /build
 RUN git clone --depth=1 https://github.com/Tekush1/narayanastra.git && \
     cargo build --release --target x86_64-unknown-linux-musl --manifest-path narayanastra/Cargo.toml && \
-    install -Dm755 narayanastra/target/x86_64-unknown-linux-musl/release/narayanastra /out/usr/local/bin/narayanastra
+    install -Dm755 narayanastra/target/x86_64-unknown-linux-musl/release/narayanastra /out/usr/bin/narayanastra
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

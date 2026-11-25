@@ -1,7 +1,7 @@
-# Project Firefly: mpv (Zen3+ / AOCC 6.0)
+# Project Firefly: MPV
 # Fedora 44 Builder using custom ffmpeg + libplacebo (>=7.387.0)
-FROM ghcr.io/celestial-uprising/firefly:ffmpeg AS ffmpeg-artifacts
-FROM ghcr.io/celestial-uprising/firefly:libplacebo AS libplacebo-artifacts
+FROM ghcr.io/celestial-uprising/firefly:FFMPEG AS ffmpeg-artifacts
+FROM ghcr.io/celestial-uprising/firefly:LIBPLACEBO AS libplacebo-artifacts
 
 FROM fedora:44 AS builder
 
@@ -62,24 +62,24 @@ ENV CC="aoc" \
     LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a -lstdc++ -lSPIRV-Tools -lSPIRV-Tools-opt"
 
 FROM builder AS compiler
-COPY --from=ffmpeg-artifacts /usr/local/ /usr/local/
-COPY --from=libplacebo-artifacts /usr/local/ /usr/local/
+COPY --from=ffmpeg-artifacts /usr/ /usr/
+COPY --from=libplacebo-artifacts /usr/ /usr/
 
-ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/lib64/pkgconfig:${PKG_CONFIG_PATH}" \
-    LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}" \
-    LD_LIBRARY_PATH="/usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}"
+ENV PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/lib64/pkgconfig:${PKG_CONFIG_PATH}" \
+    LIBRARY_PATH="/usr/lib:/usr/lib64:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="/usr/lib:/usr/lib64:${LD_LIBRARY_PATH}"
 
 WORKDIR /build/mpv
 RUN git clone --depth 1 https://github.com/mpv-player/mpv.git . && \
     meson setup build \
       --buildtype=release \
-      --prefix=/usr/local \
+      --prefix=/usr \
       -Dprefer_static=true \
       -Dwayland=enabled \
       -Dvulkan=enabled && \
     ninja -C build -j16 && \
     DESTDIR=/out ninja -C build install && \
-    llvm-strip --strip-unneeded /out/usr/local/bin/mpv 2>/dev/null || true
+    llvm-strip --strip-unneeded /out/usr/bin/mpv 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /
