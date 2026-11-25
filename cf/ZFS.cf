@@ -1,0 +1,70 @@
+# Project Firefly: OpenZFS Userland Tools (--with-config=user)
+# Target: x86_64 Zen 3 on Fedora 44 with AOCC 6.0
+
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git \
+  curl \
+  ca-certificates \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  make \
+  autoconf \
+  automake \
+  libtool \
+  pkgconf-pkg-config \
+  openssl-devel \
+  zlib-devel \
+  libblkid-devel \
+  libuuid-devel \
+  libtirpc-devel \
+  libudev-devel \
+  libaio-devel \
+  elfutils-libelf-devel \
+  kmod \
+  libquadmath \
+  ncurses-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip"
+
+FROM builder AS compiler
+
+WORKDIR /build/zfs
+RUN git clone --depth 1 https://github.com/openzfs/zfs.git . && \
+    sh autogen.sh && \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM -fno-unwind-tables -fno-asynchronous-unwind-tables" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM -fno-unwind-tables -fno-asynchronous-unwind-tables" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a -Wl,--no-fatal-warnings" \
+    ./configure \
+      --prefix=/usr \
+      --with-config=user && \
+    make -j16 && \
+    DESTDIR=/out make install && \
+    find /out/usr/bin /out/usr/sbin /out/usr/lib* -type f \
+      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    test -x /out/usr/sbin/zfs && \
+    test -x /out/usr/sbin/zpool
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

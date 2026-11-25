@@ -1,0 +1,28 @@
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git ca-certificates make pkgconf-pkg-config libcurl-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    CC="aoc" CXX="aoc++" LD="ld.lld" AR="llvm-ar" RANLIB="llvm-ranlib" STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3" \
+    LDFLAGS="-fuse-ld=lld"
+
+WORKDIR /build/trurl
+RUN git clone --depth 1 https://github.com/curl/trurl.git . && \
+    make -j16 && \
+    mkdir -p /out/usr/bin && \
+    cp trurl /out/usr/bin/trurl && \
+    llvm-strip --strip-unneeded /out/usr/bin/trurl
+
+FROM scratch AS export
+COPY --from=builder /out/ /

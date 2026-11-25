@@ -1,0 +1,59 @@
+# Project Firefly: NVIDIA 580 Userland + CUDA 13.0 (Fedora 44 + AOCC 6.0) — bootc prep
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  ca-certificates \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  make \
+  pkgconf-pkg-config \
+  libquadmath \
+  ncurses-devel \
+  libglvnd-devel \
+  vulkan-loader \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip"
+
+FROM builder AS compiler
+
+COPY nvidia-580/ /tmp/nvidia-580/
+
+RUN mkdir -p /out/usr/bin /out/usr/lib64 /out/opt && \
+    DRIVER_RUN="$(ls -1 /tmp/nvidia-580/*Linux*580*.run /tmp/nvidia-580/*driver*.run 2>/dev/null | head -n 1)" && \
+    test -n "${DRIVER_RUN}" && \
+    sh "${DRIVER_RUN}" --extract-only --target /tmp/nv-extract && \
+    cp -a /tmp/nv-extract/nvidia-smi /out/usr/bin/ 2>/dev/null || true && \
+    cp -a /tmp/nv-extract/nvidia-modprobe /out/usr/bin/ 2>/dev/null || true && \
+    cp -a /tmp/nv-extract/nvidia-persistenced /out/usr/bin/ 2>/dev/null || true && \
+    find /tmp/nv-extract -maxdepth 2 -name "libcuda.so*" -o -name "libnvidia-*.so*" | xargs -r cp -a -t /out/usr/lib64/ && \
+    CUDA_RUN="$(ls -1 /tmp/nvidia-580/*cuda*13*.run /tmp/nvidia-580/*cuda*.run 2>/dev/null | head -n 1)" && \
+    test -n "${CUDA_RUN}" && \
+    sh "${CUDA_RUN}" --silent --toolkit --toolkitpath=/out/opt/cuda-13.0 --no-drm && \
+    ln -sfn /opt/cuda-13.0 /out/opt/cuda && \
+    find /out/usr/bin /out/usr/lib64 -maxdepth 1 -type f \
+      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    test -x /out/opt/cuda-13.0/bin/nvcc && \
+    rm -rf /tmp/nvidia-580 /tmp/nv-extract
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

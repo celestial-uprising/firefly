@@ -1,0 +1,24 @@
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git ca-certificates golang make \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    CC="aoc" CXX="aoc++" LD="ld.lld" AR="llvm-ar" RANLIB="llvm-ranlib" STRIP="llvm-strip" \
+    CGO_ENABLED=1 CGO_CFLAGS="-O3 -march=znver3"
+
+WORKDIR /build/gnat
+RUN git clone --depth 1 https://github.com/galaxy-io/gnat.git . && \
+    mkdir -p /out/usr/bin && \
+    go build -trimpath -ldflags="-s -w" -o /out/usr/bin/gnat ./cmd/gnat && \
+    llvm-strip --strip-unneeded /out/usr/bin/gnat
+
+FROM scratch AS export
+COPY --from=builder /out/ /

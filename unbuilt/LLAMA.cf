@@ -1,0 +1,203 @@
+# Project Firefly: mimalloc + ZenDNN + CUDA + Vulkan + llama.cpp (Fedora 44 + AOCC 6.0)
+FROM fedora:44 AS base
+
+RUN dnf install -y \
+  git \
+  ca-certificates \
+  dnf-plugins-core \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  make \
+  cmake \
+  ninja-build \
+  pkgconf-pkg-config \
+  libquadmath \
+  libquadmath-devel \
+  ncurses-devel \
+  libomp-devel \
+  vulkan-loader-devel \
+  glslc \
+  && dnf config-manager addrepo --from-repofile=https://developer.download.nvidia.com/compute/cuda/repos/fedora44/x86_64/cuda-fedora44.repo 2>/dev/null \
+     || dnf config-manager addrepo --from-repofile=https://developer.download.nvidia.com/compute/cuda/repos/fedora41/x86_64/cuda-fedora41.repo \
+  && dnf install -y \
+       cuda-nvcc \
+       cuda-cudart-devel \
+       libcublas-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV CUDA_HOME="/usr/local/cuda"
+ENV PATH="${CUDA_HOME}/bin:${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${CUDA_HOME}/lib64:${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${CUDA_HOME}/include:${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${CUDA_HOME}/include:${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}" \
+    LIBCLANG_PATH="${AOCC_DIR}/lib"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip"
+
+# ---------------------------------------------------------------------------
+# Stage 1: Clone and build mimalloc from source
+# ---------------------------------------------------------------------------
+FROM base AS mimalloc-builder
+
+ENV MIMALLOC_DIR="/build/mimalloc"
+ENV MIMALLOC_CFLAGS="-march=znver3 -mtune=znver3 -O3 -fPIC"
+ENV MIMALLOC_CXXFLAGS="-march=znver3 -mtune=znver3 -O3 -fPIC"
+ENV MIMALLOC_LDFLAGS="-fuse-ld=lld -O3"
+
+WORKDIR "${MIMALLOC_DIR}"
+RUN git clone --depth 1 https://github.com/microsoft/mimalloc.git . && \
+    rm -rf build && \
+    cmake -S "${MIMALLOC_DIR}" -B "${MIMALLOC_DIR}/build" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER="aoc" \
+      -DCMAKE_CXX_COMPILER="aoc++" \
+      -DCMAKE_C_FLAGS="${MIMALLOC_CFLAGS}" \
+      -DCMAKE_CXX_FLAGS="${MIMALLOC_CXXFLAGS}" \
+      -DCMAKE_EXE_LINKER_FLAGS="${MIMALLOC_LDFLAGS}" \
+      -DCMAKE_SHARED_LINKER_FLAGS="${MIMALLOC_LDFLAGS}" \
+      -DMI_BUILD_SHARED=ON \
+      -DMI_BUILD_STATIC=ON \
+      -DMI_BUILD_OBJECT=ON \
+      -DMI_BUILD_TESTS=OFF && \
+    cmake --build "${MIMALLOC_DIR}/build" -j16 && \
+    cmake --install "${MIMALLOC_DIR}/build" && \
+    DESTDIR=/out cmake --install "${MIMALLOC_DIR}/build" && \
+    find /out/usr/local -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Stage 2: Clone and build ZenDNN (with libxsmm)
+# ---------------------------------------------------------------------------
+FROM base AS zendnn-builder
+
+ENV ZENDNN_DIR="/build/ZenDNN"
+ENV ZENDNN_CFLAGS="-march=znver3 -mtune=znver3 -O3 -zopt -Wno-pass-failed -fPIC"[cite: 1]
+ENV ZENDNN_CXXFLAGS="-march=znver3 -mtune=znver3 -O3 -zopt -Wno-pass-failed -fPIC -Wno-vla-cxx-extension"[cite: 1]
+
+WORKDIR "${ZENDNN_DIR}"
+RUN git clone --depth 1 https://github.com/amd/ZenDNN.git . && \
+    find "${ZENDNN_DIR}/zendnnl" -name "CMakeLists.txt" -exec sed -i 's/-Werror/-Wno-error/g' {} + 2>/dev/null || true && \
+    rm -rf "${ZENDNN_DIR}/build" && \
+    cmake -S "${ZENDNN_DIR}" -B "${ZENDNN_DIR}/build" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER="aoc" \
+      -DCMAKE_CXX_COMPILER="aoc++" \
+      -DCMAKE_C_FLAGS="${ZENDNN_CFLAGS}" \
+      -DCMAKE_CXX_FLAGS="${ZENDNN_CXXFLAGS}" \
+      -DZENDNNL_DEPENDS_LIBXSMM=ON && \
+    cmake --build "${ZENDNN_DIR}/build" -j16 && \
+    test -f "${ZENDNN_DIR}/build/install/zendnnl/lib/libzendnnl_archive.a" && \
+    test -f "${ZENDNN_DIR}/build/install/deps/libxsmm/lib/libxsmm.a" && \
+    mkdir -p /out/usr/local/zendnn && \
+    cp -a "${ZENDNN_DIR}/build/install/." /out/usr/local/zendnn/
+
+# ---------------------------------------------------------------------------
+# Stage 3: Clone and build llama.cpp with mimalloc + ZenDNN + CUDA + Vulkan
+# ---------------------------------------------------------------------------
+FROM base AS llama-builder
+
+COPY --from=mimalloc-builder /usr/local/include/mimalloc* /usr/local/include/
+COPY --from=mimalloc-builder /usr/local/lib*/libmimalloc* /usr/local/lib64/
+COPY --from=mimalloc-builder /out/usr/local /out/usr/local
+COPY --from=zendnn-builder /build/ZenDNN/build/install /build/ZenDNN/build/install
+COPY --from=zendnn-builder /out/usr/local/zendnn /out/usr/local/zendnn
+
+ENV ZENDNN_ROOT="/build/ZenDNN/build/install"
+ENV REPO_DIR="/build/llama-zen"
+ENV OMP_PROC_BIND="spread"[cite: 2]
+ENV OMP_PLACES="cores"[cite: 2]
+ENV OMP_WAIT_POLICY="active"[cite: 2]
+ENV CUDA_DEVICE_ORDER="PCI_BUS_ID"[cite: 2]
+ENV ZENDNNL_MATMUL_ALGO="1"[cite: 2]
+
+ENV AGGRO_CFLAGS="\
+-march=znver3 -mtune=znver3 -zopt -O3 -flto=full \
+-ffast-math -fno-finite-math-only -fno-semantic-interposition \
+-falign-functions=32 -falign-loops=32 -mprefer-vector-width=256 \
+-fveclib=AMDLIBM \
+-mllvm -inline-threshold=1000 -finline-recursion=4 \
+-mllvm -unroll-threshold=100 -mllvm -unroll-aggressive -funroll-loops \
+-fitodcalls -fitodcallsbyclone \
+-fstruct-layout=5 -mllvm -reduce-array-computations=3 \
+-mllvm -global-vectorize-slp=true \
+-fepilog-vectorization-of-inductions -fenable-restrict-based-lv \
+-mllvm -enable-conditional-fixed-value \
+-mllvm -enable-partial-unswitch -mllvm -aggressive-loop-unswitch \
+-mllvm -lv-function-specialization \
+-mllvm -enable-loop-fusion -mllvm -enable-loopinterchange \
+-mllvm -fuse-tile-inner-loop -mllvm -enable-loop-distribute-adv \
+-fstrip-mining -ffunction-specialization-cost-model \
+-mllvm -enable-strided-vectorization -mllvm -optimize-strided-mem-cost \
+-mllvm -enable-licm-vrp -mllvm -merge-constant \
+-mllvm -do-block-reorder=complex \
+-Wno-pass-failed -Wno-unused-command-line-argument -Wno-c++11-narrowing"[cite: 2]
+
+ENV AGGRO_LDFLAGS="\
+-flto=full -fuse-ld=lld \
+-Wl,-mllvm,-threads=16 \
+-Wl,-mllvm,-extra-inliner \
+-Wl,-mllvm,-ldist-scalar-expand \
+-Wl,-mllvm,-lsr-in-nested-loop \
+-Wl,-mllvm,-do-block-reorder=complex \
+-Wl,-mllvm,-align-all-nofallthru-blocks=6 \
+-Wl,-plugin-opt=-enable-redundant-movs \
+-lamdlibm -lm"[cite: 2]
+
+WORKDIR "${REPO_DIR}"
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp.git . && \
+    rm -rf build && \
+    cmake -B build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_C_COMPILER="aoc" \
+      -DCMAKE_CXX_COMPILER="aoc++" \
+      -DCMAKE_CUDA_COMPILER="/usr/local/cuda/bin/nvcc" \
+      -DCMAKE_C_FLAGS="${AGGRO_CFLAGS}" \
+      -DCMAKE_CXX_FLAGS="${AGGRO_CFLAGS}" \
+      -DCMAKE_EXE_LINKER_FLAGS="${AGGRO_LDFLAGS}" \
+      -DCMAKE_SHARED_LINKER_FLAGS="${AGGRO_LDFLAGS}" \
+      -DCMAKE_CUDA_FLAGS='-O3 --use_fast_math --extra-device-vectorization -allow-unsupported-compiler -Xptxas=-O3 -Xcompiler="-march=znver3,-O3"' \
+      -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+      -DCMAKE_INSTALL_RPATH='$ORIGIN' \
+      -DGGML_NATIVE=ON \
+      -DGGML_LTO=OFF \
+      -DGGML_MIMALLOC=ON \
+      -DGGML_BACKEND_DL=OFF \
+      -DGGML_OPENMP=ON \
+      -DGGML_BLAS=OFF \
+      -DGGML_ZENDNN=ON \
+      -DZENDNN_ROOT="${ZENDNN_ROOT}" \
+      -DGGML_CUDA=ON \
+      -DGGML_VULKAN=ON \
+      -DCMAKE_CUDA_ARCHITECTURES="60-real;86-real" \
+      -DGGML_CUDA_FA_QUANTS="f16-f16;q8_0-q8_0;q5_1-q5_1;q4_1-q4_1;q8_0-q5_1;q8_0-q4_1;q4_0-q4_0;q8_0-q4_0" \
+      -DGGML_CUDA_F16=ON \
+      -DGGML_CUDA_GRAPHS=ON \
+      -DGGML_CUDA_FORCE_MMQ=OFF \
+      -DGGML_CUDA_DMMV_X=64 \
+      -DGGML_CUDA_MMV_Y=2 && \
+    ninja -C build && \
+    mkdir -p /out/usr/local/bin /out/usr/local/lib && \
+    find build/bin -maxdepth 1 -type f -executable -exec cp -a {} /out/usr/local/bin/ \; && \
+    find build -maxdepth 3 -name "libllama*.a" -o -name "libggml*.a" | xargs -r cp -a -t /out/usr/local/lib/ && \
+    find /out/usr/local/bin -type f -executable -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Export Stage: llama.cpp + mimalloc + ZenDNN artifacts
+# ---------------------------------------------------------------------------
+FROM scratch AS export
+COPY --from=llama-builder /out/ /

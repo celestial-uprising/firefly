@@ -1,0 +1,28 @@
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  git ca-certificates gcc gcc-c++ make pkgconf-pkg-config \
+  rust cargo rustfmt clippy \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    CC="aoc" CXX="aoc++" LD="ld.lld" AR="llvm-ar" RANLIB="llvm-ranlib" STRIP="llvm-strip" \
+    RUSTFLAGS="-C target-cpu=znver3 -C opt-level=3 -C link-arg=-fuse-ld=lld"
+
+WORKDIR /build/tennis
+RUN git clone --depth 1 https://github.com/gurgeous/tennis.git . && \
+    cargo build --release --locked 2>/dev/null || cargo build --release && \
+    mkdir -p /out/usr/bin && \
+    cp target/release/tennis /out/usr/bin/tennis && \
+    llvm-strip --strip-unneeded /out/usr/bin/tennis
+
+FROM scratch AS export
+COPY --from=builder /out/ /
