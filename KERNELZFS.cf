@@ -1,40 +1,48 @@
-# Project Firefly: Linux 7.2.15 (Rust + Upstream rustup) + Built-in OpenZFS (Zen3+ / AOCC 6.0)
-# Fedora 44 Builder
-FROM fedora:44 AS builder
+# Project Firefly: Linux v7.2.15 + Rust + Built-in OpenZFS + AOCC 6.0 (Zen 3)
+FROM fedora:44 AS toolchain
 
 RUN dnf install -y \
-  rsync \
   git \
   curl \
   ca-certificates \
+  make \
+  cmake \
+  ninja-build \
+  automake \
+  autoconf \
+  libtool \
+  m4 \
+  gawk \
+  pkgconf-pkg-config \
   gcc \
   gcc-c++ \
+  glibc-devel \
   libstdc++-devel \
-  bindgen-cli \
+  lld \
+  llvm \
   clang-devel \
-  make \
-  autoconf \
-  automake \
-  libtool \
+  bindgen-cli \
+  elfutils-libelf-devel \
+  openssl-devel \
+  zlib-devel \
+  libzstd-devel \
+  libaio-devel \
+  libattr-devel \
+  libblkid-devel \
+  libtirpc-devel \
+  libudev-devel \
+  pam-devel \
+  python3 \
+  python3-devel \
+  python3-cffi \
+  python3-setuptools \
   bc \
   bison \
   flex \
-  perl \
-  python3 \
-  openssl-devel \
-  zlib-devel \
-  libblkid-devel \
-  libuuid-devel \
-  libtirpc-devel \
-  libudev-devel \
-  libaio-devel \
-  elfutils-libelf-devel \
-  dwarves \
+  tar \
+  xz \
+  zstd \
   kmod \
-  which \
-  pkgconf-pkg-config \
-  libquadmath \
-  ncurses-devel \
   && dnf clean all
 
 COPY aocc-v6/aocc* /tmp/
@@ -42,30 +50,29 @@ RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
     rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
     rm -f /tmp/aocc*
 
-ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0" \
-    CARGO_HOME="/usr/local/cargo" \
-    RUSTUP_HOME="/usr/local/rustup"
-ENV PATH="${AOCC_DIR}/bin:${CARGO_HOME}/bin:${PATH}" \
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="/root/.cargo/bin:${AOCC_DIR}/bin:${PATH}" \
     LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
     LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
     C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
     CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}" \
-    LIBCLANG_PATH="/opt/AMD/aocc-compiler-6.0.0/lib"
-
-ENV CC="aoc" \
+    LLVM="1" \
+    CC="aoc" \
     CXX="aoc++" \
+    LD="ld.lld" \
     AR="llvm-ar" \
     RANLIB="llvm-ranlib" \
     NM="llvm-nm" \
+    OBJDUMP="llvm-objdump" \
+    OBJCOPY="llvm-objcopy" \
+    READELF="llvm-readelf" \
     STRIP="llvm-strip" \
-    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
+    RUSTUP_HOME="/root/.rustup" \
+    CARGO_HOME="/root/.cargo"
 
-# Install upstream rustup without a default toolchain first
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
 
-FROM builder AS compiler
+FROM toolchain AS compiler
 
 RUN mkdir -p /out/boot
 
@@ -94,11 +101,9 @@ RUN git clone --depth 1 https://github.com/openzfs/zfs.git . && \
       ( grep -A 25 "checking whether CONFIG_MODULES is defined" config.log || true; exit 1 ) ) && \
     ./copy-builtin /build/linux
 
-# 1. Finalize Kconfig with ZFS injected and build Rust-enabled kernel
 WORKDIR /build/linux
-COPY kconfig/custom.config .config
-RUN ./copy-builtin /build/linux && \
-    scripts/config \
+COPY kconfig/custom.config /build/linux/.config
+RUN scripts/config \
       --enable CONFIG_MODULES \
       --enable CONFIG_RUST \
       --enable CONFIG_ZFS \
@@ -123,7 +128,6 @@ RUN ./copy-builtin /build/linux && \
     depmod -b /out "${KVER}" 2>/dev/null || true && \
     make LLVM=1 INSTALL_HDR_PATH=/out/usr/local headers_install
 
-# 2. Build ZFS userspace utilities with Zen3 + AOCC + LTO + AMDLIBM flags
 WORKDIR /build/zfs
 RUN make distclean 2>/dev/null || true && \
     sh autogen.sh && \
