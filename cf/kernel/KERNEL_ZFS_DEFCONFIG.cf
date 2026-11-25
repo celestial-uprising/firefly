@@ -1,0 +1,141 @@
+# Project Firefly: Linux 7.2.15 (Rust + Upstream rustup) + Built-in OpenZFS (Zen3+ / AOCC 6.0)
+# Fedora 44 Builder
+FROM fedora:44 AS builder
+
+RUN dnf install -y \
+  rsync \
+  git \
+  curl \
+  ca-certificates \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  bindgen-cli \
+  clang-devel \
+  make \
+  autoconf \
+  automake \
+  libtool \
+  bc \
+  bison \
+  flex \
+  perl \
+  python3 \
+  openssl-devel \
+  zlib-devel \
+  libblkid-devel \
+  libuuid-devel \
+  libtirpc-devel \
+  libudev-devel \
+  libaio-devel \
+  elfutils-libelf-devel \
+  dwarves \
+  kmod \
+  which \
+  pkgconf-pkg-config \
+  libquadmath \
+  ncurses-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0" \
+    CARGO_HOME="/usr/local/cargo" \
+    RUSTUP_HOME="/usr/local/rustup"
+ENV PATH="${AOCC_DIR}/bin:${CARGO_HOME}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}" \
+    LIBCLANG_PATH="/opt/AMD/aocc-compiler-6.0.0/lib"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a"
+
+# Install upstream rustup without a default toolchain first
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain none
+
+FROM builder AS compiler
+
+RUN mkdir -p /out/boot
+
+WORKDIR /build/linux
+RUN git clone --depth 1 --branch v7.2.15 https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git . && \
+    RUST_VER="$(scripts/min-tool-version.sh rustc)" && \
+    rustup toolchain install "${RUST_VER}" && \
+    rustup default "${RUST_VER}" && \
+    rustup component add rust-src --toolchain "${RUST_VER}" && \
+    make LLVM=1 defconfig && \
+    scripts/config --enable CONFIG_MODULES && \
+    make LLVM=1 olddefconfig && \
+    grep -E '^CONFIG_MODULES=' .config && \
+    make LLVM=1 rustavailable && \
+    make LLVM=1 prepare && \
+    make LLVM=1 modules_prepare
+
+WORKDIR /build/zfs
+RUN git clone --depth 1 https://github.com/openzfs/zfs.git . && \
+    sh autogen.sh && \
+    ( ./configure \
+        LLVM=1 \
+        --with-linux=/build/linux \
+        --with-linux-obj=/build/linux \
+        --enable-linux-builtin || \
+      ( grep -A 25 "checking whether CONFIG_MODULES is defined" config.log || true; exit 1 ) ) && \
+    ./copy-builtin /build/linux
+
+# 1. Finalize Kconfig with ZFS injected and build Rust-enabled kernel
+WORKDIR /build/linux
+RUN scripts/config --enable CONFIG_MODULES \
+      --enable CONFIG_RUST \
+      --enable CONFIG_ZFS \
+      --enable CONFIG_EFI_PARTITION \
+      --enable CONFIG_BLOCK \
+      --enable CONFIG_ZLIB_INFLATE \
+      --enable CONFIG_ZLIB_DEFLATE \
+      --enable CONFIG_CRYPTO_CRC32C_INTEL \
+      --enable CONFIG_CRYPTO_SHA256 \
+      --enable CONFIG_CRYPTO_SHA512 && \
+    make LLVM=1 olddefconfig && \
+    grep -E '^CONFIG_(MODULES|RUST|ZFS)=' .config && \
+    make LLVM=1 \
+      KCFLAGS="-O3 -march=znver3 -mtune=znver3" \
+      KBUILD_LDFLAGS="-fuse-ld=lld" \
+      -j16 && \
+    KVER="$(make -s LLVM=1 kernelrelease)" && \
+    cp arch/x86/boot/bzImage "/out/boot/vmlinuz-${KVER}" && \
+    cp System.map "/out/boot/System.map-${KVER}" && \
+    cp .config "/out/boot/config-${KVER}" && \
+    make LLVM=1 INSTALL_MOD_PATH=/out modules_install && \
+    depmod -b /out "${KVER}" 2>/dev/null || true && \
+    make LLVM=1 INSTALL_HDR_PATH=/out/usr/local headers_install
+
+# 2. Build ZFS userspace utilities with Zen3 + AOCC + LTO + AMDLIBM flags
+WORKDIR /build/zfs
+RUN make distclean 2>/dev/null || true && \
+    sh autogen.sh && \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -l:libamdlibm.a" \
+    ./configure \
+      --prefix=/usr/local \
+      --with-linux=/build/linux \
+      --with-linux-obj=/build/linux \
+      --with-config=user && \
+    make -j16 && \
+    DESTDIR=/out make install && \
+    find /out/usr/local/bin /out/usr/local/sbin /out/usr/local/lib* -type f \
+      \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
+
+FROM scratch AS export
+COPY --from=compiler /out/ /
