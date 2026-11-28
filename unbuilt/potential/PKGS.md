@@ -31,3 +31,19 @@
 - https://github.com/sockheadrps/llmctl
 - https://llamamon.com/docs
 - https://github.com/hrtowii/llm-tui-rs
+
+# Terminal Trove C-Lang
+
+- tmux
+- curl
+- vim
+- hashcat
+- radare2
+- fastfetch
+- goaccess
+- tig
+- nvtop
+- htop
+- blink
+- cava
+- cmus
