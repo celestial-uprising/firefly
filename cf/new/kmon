@@ -1,0 +1,84 @@
+# Project Firefly: Kmon
+# Fedora 44 + Zen3+ Builder (AOCC 6.0 + ld.lld + Static Runtime Preference)
+FROM fedora:44 AS builder
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+  git \
+  curl \
+  ca-certificates \
+  gcc \
+  gcc-c++ \
+  pkgconf-pkg-config \
+  libstdc++-devel \
+  libstdc++-static \
+  libquadmath \
+  libquadmath-static \
+  lld \
+  ncurses \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}"
+ENV LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}"
+ENV C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}"
+ENV CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV RUSTUP_HOME="/usr/local/rustup"
+ENV CARGO_HOME="/usr/local/cargo"
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --default-toolchain nightly --profile minimal && \
+    rustup component add rust-src --toolchain nightly
+
+ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
+    CARGO_BUILD_JOBS="16" \
+    CARGO_INSTALL_ROOT="/out/usr" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="aoc" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=znver3 -C link-arg=-fuse-ld=lld -C link-arg=-static-libstdc++ -C link-arg=-static-libgcc -C link-arg=-Wl,-O3,-z,opt,--gc-sections,--as-needed -C link-arg=-l:libamdlibm.a -Z threads=16" \
+    CARGO_UNSTABLE_BUILD_STD="std,panic_abort" \
+    CARGO_UNSTABLE_PROFILE_RUSTFLAGS="true" \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL="3" \
+    CARGO_PROFILE_RELEASE_LTO="fat" \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS="1" \
+    CARGO_PROFILE_RELEASE_PANIC="abort" \
+    CARGO_PROFILE_RELEASE_STRIP="symbols" \
+    CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a" \
+    PKG_CONFIG_PATH="/usr/lib64/pkgconfig:/usr/share/pkgconfig" \
+    PKG_CONFIG_LIBDIR="/usr/lib64/pkgconfig:/usr/share/pkgconfig" \
+    PKG_CONFIG_ALLOW_SYSTEM_CFLAGS="0" \
+    PKG_CONFIG_ALLOW_SYSTEM_LIBS="0"
+
+FROM builder AS compiler
+WORKDIR /build
+RUN mkdir -p /out/usr && \
+    cargo install --locked kmon && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/.crates.toml /out/usr/.crates2.json && \
+    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    for bin in /out/usr/bin/*; do \
+      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
+        echo "=== NEEDED: $(basename "$bin") ==="; \
+        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+      fi; \
+    done
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

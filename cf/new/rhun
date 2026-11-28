@@ -1,0 +1,42 @@
+# Project Firefly: Rhun
+# Fedora 44 Assembly Builder (ld.lld + Zen 3 + Static Runtime Preference)
+FROM fedora:44 AS builder
+RUN dnf install -y --setopt=tsflags=nodocs \
+    git \
+    binutils \
+    lld \
+    diffutils \
+    gcc \
+    gcc-c++ \
+    libstdc++-devel \
+    libstdc++-static \
+    && dnf clean all
+
+ENV MAKEFLAGS="-j16" \
+    LD="ld.lld" \
+    LDFLAGS="-fuse-ld=lld -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings"
+
+FROM builder AS compiler
+WORKDIR /build
+RUN mkdir -p /out/usr/bin /out/usr/share/applications /out/usr/share/icons/hicolor
+
+RUN git clone --depth 1 https://github.com/vshvedov/rhun.git /build/rhun
+WORKDIR /build/rhun
+
+# Build stripped release binary and stage binary + desktop assets
+RUN ./build.sh release && \
+    cp -a /build/rhun/build/rhun /out/usr/bin/rhun && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/.crates.toml /out/usr/.crates2.json && \
+    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    for bin in /out/usr/bin/*; do \
+      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
+        echo "=== NEEDED: $(basename "$bin") ==="; \
+        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+      fi; \
+    done
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

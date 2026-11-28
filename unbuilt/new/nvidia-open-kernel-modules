@@ -1,0 +1,89 @@
+# Project Firefly: Latest Upstream NVIDIA Open Kernel Modules (Fedora 44 + AOCC 6.0) — bootc prep
+FROM ghcr.io/celestial-uprising/firefly:KERNEL AS kernel-src
+
+FROM fedora:44 AS builder
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+  git \
+  ca-certificates \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  libstdc++-static \
+  make \
+  elfutils-libelf-devel \
+  kmod \
+  which \
+  pkgconf-pkg-config \
+  libquadmath \
+  libquadmath-static \
+  lld \
+  ncurses-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    OBJCOPY="llvm-objcopy" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a"
+
+FROM builder AS compiler
+
+COPY --from=kernel-src /lib/modules /build/kernel-root/lib/modules
+COPY --from=kernel-src /usr /build/kernel-root/usr
+
+WORKDIR /build/open-gpu-kernel-modules
+RUN mkdir -p /out/usr/bin && \
+    git clone --depth 1 https://github.com/NVIDIA/open-gpu-kernel-modules.git .
+
+RUN KVER="$(ls -1 /build/kernel-root/lib/modules | head -n 1)" && \
+    test -n "${KVER}" && \
+    KSRC="/build/kernel-root/lib/modules/${KVER}/build" && \
+    test -d "${KSRC}" && \
+    make -j16 \
+      SYSSRC="${KSRC}" \
+      SYSOUT="${KSRC}" \
+      TARGET_ARCH=x86_64 \
+      CC="aoc" \
+      CXX="aoc++" \
+      LD="ld.lld" \
+      AR="llvm-ar" \
+      OBJCOPY="llvm-objcopy" \
+      NV_VERBOSE=1 \
+      modules && \
+    mkdir -p "/out/lib/modules/${KVER}/extra/nvidia" && \
+    find kernel-open -name "*.ko" -exec cp {} "/out/lib/modules/${KVER}/extra/nvidia/" \; && \
+    find /out/lib/modules -type f -name "*.ko" -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    depmod -b /out "${KVER}" 2>/dev/null || true && \
+    test -n "$(find "/out/lib/modules/${KVER}/extra/nvidia" -name "*.ko" -print -quit)" && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/lib64/*.a /out/usr/lib/*.a && \
+    for bin in /out/usr/bin/*; do \
+      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
+        echo "=== NEEDED: $(basename "$bin") ==="; \
+        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+      fi; \
+    done
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1
+# Target: x86_64 AMD Zen 3 (znver3) on Fedora 44 with AOCC 6.0 + ld.lld + AMDLIBM
+
+FROM fedora:44 AS builder
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+    git curl ca-certificates make cmake ninja-build meson scdoc \
+    pkgconf-pkg-config gcc gcc-c++ glibc-devel libstdc++-devel libstdc++-static \
+    libquadmath libquadmath-static lld \
+    && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    MAKEFLAGS="-j16" \
+    CMAKE_BUILD_PARALLEL_LEVEL="16" \
+    NINJA_STATUS="[%f/%t] "
+
+FROM builder AS compiler
+
+ARG REPO_URL=https://github.com/cgwalters/chunkah.git
+ARG REPO_REF=main
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+    cargo rust openssl-devel zlib-ng-compat-devel \
+    && dnf clean all
+
+WORKDIR /build/src
+RUN git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" .
+
+ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="ld.lld" \
+    RUSTFLAGS="-C target-cpu=znver3 -C opt-level=3 -C lto=fat -C codegen-units=1 -C link-arg=-fuse-ld=lld -C link-arg=-static-libstdc++ -C link-arg=-static-libgcc -C link-arg=-Wl,-O3,-z,opt,--gc-sections,--as-needed"
+
+RUN cargo build --release --locked && \
+    install -Dm755 target/release/chunkah /out/usr/bin/chunkah
+
+# Normalize /out/usr/sbin -> /out/usr/bin, clean dev clutter, strip binaries, and inspect NEEDED libs
+RUN if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig && \
+    if [ -d /out/usr ]; then \
+      find /out/usr -type f \( -executable -o -name "*.so*" \) \
+        -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true; \
+      for bin in /out/usr/bin/*; do \
+        if [ -f "$bin" ] && [ -x "$bin" ] && file -b "$bin" | grep -q "ELF"; then \
+          echo "=== NEEDED: $(basename "$bin") ==="; \
+          readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+        fi; \
+      done; \
+    fi
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

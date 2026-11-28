@@ -1,0 +1,77 @@
+# syntax=docker/dockerfile:1
+# Target: x86_64 AMD Zen 3 (znver3) on Fedora 44 with AOCC 6.0 + ld.lld + AMDLIBM
+
+FROM fedora:44 AS builder
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+    git curl ca-certificates make cmake ninja-build meson scdoc \
+    pkgconf-pkg-config gcc gcc-c++ glibc-devel libstdc++-devel libstdc++-static \
+    libquadmath libquadmath-static lld \
+    && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    MAKEFLAGS="-j16" \
+    CMAKE_BUILD_PARALLEL_LEVEL="16" \
+    NINJA_STATUS="[%f/%t] "
+
+FROM builder AS compiler
+
+ARG REPO_URL=https://github.com/containers/buildah.git
+ARG REPO_REF=main
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+    golang go-md2man gpgme-devel device-mapper-devel btrfs-progs-devel \
+    libassuan-devel libseccomp-devel glib2-devel shadow-utils-subid-devel \
+    && dnf clean all
+
+WORKDIR /build/src
+RUN git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" . && \
+    mkdir -p /out
+
+ENV GOOS="linux" \
+    GOARCH="amd64" \
+    GOAMD64="v3" \
+    CGO_ENABLED="1" \
+    CGO_CFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt" \
+    CGO_LDFLAGS="-fuse-ld=lld -static-libstdc++ -static-libgcc -Wl,-O3,-z,opt,--gc-sections,--as-needed,--no-fatal-warnings" \
+    BUILDTAGS="seccomp selinux exclude_graphdriver_devicemapper"
+
+RUN make -j"$(nproc)" PREFIX=/usr EXTRA_LDFLAGS="-s -w -extldflags=-fuse-ld=lld -extldflags=-static-libstdc++ -extldflags=-static-libgcc -extldflags=-Wl,-O3,-z,opt,--gc-sections,--as-needed,--no-fatal-warnings" && \
+    make install DESTDIR=/out PREFIX=/usr
+
+# Normalize /out/usr/sbin -> /out/usr/bin, clean dev clutter, strip binaries, and inspect NEEDED libs
+RUN if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig && \
+    if [ -d /out/usr ]; then \
+      find /out/usr -type f \( -executable -o -name "*.so*" \) \
+        -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true; \
+      for bin in /out/usr/bin/*; do \
+        if [ -f "$bin" ] && [ -x "$bin" ] && file -b "$bin" | grep -q "ELF"; then \
+          echo "=== NEEDED: $(basename "$bin") ==="; \
+          readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+        fi; \
+      done; \
+    fi
+
+FROM scratch AS export
+COPY --from=compiler /out/ /
