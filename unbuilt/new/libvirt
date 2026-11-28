@@ -1,0 +1,141 @@
+# Project Firefly: libvirt (Zen3+ / AOCC 6.0 + ld.lld + Static Runtime Preference)
+# Fedora 44 Builder — bootc layout under /out/usr
+FROM fedora:44 AS builder
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+  git \
+  ca-certificates \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  libstdc++-static \
+  libquadmath \
+  libquadmath-static \
+  lld \
+  ncurses \
+  ncurses-devel \
+  meson \
+  ninja-build \
+  pkgconf-pkg-config \
+  python3 \
+  python3-docutils \
+  libxml2-devel \
+  libxslt \
+  glib2-devel \
+  gnutls-devel \
+  libnl3-devel \
+  libtirpc-devel \
+  libssh-devel \
+  libssh2-devel \
+  libcurl-devel \
+  json-c-devel \
+  libcap-ng-devel \
+  libacl-devel \
+  libattr-devel \
+  libpcap-devel \
+  libpciaccess-devel \
+  numactl-devel \
+  systemd-devel \
+  libselinux-devel \
+  polkit-devel \
+  readline-devel \
+  bash-completion \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a"
+
+FROM builder AS compiler
+WORKDIR /build/libvirt
+
+RUN mkdir -p /out && \
+    git clone --depth 1 https://github.com/libvirt/libvirt.git . && \
+    meson setup build \
+      --buildtype=release \
+      --prefix=/usr \
+      --bindir=bin \
+      --sbindir=bin \
+      --libdir=lib64 \
+      --libexecdir=libexec \
+      --sysconfdir=/etc \
+      --localstatedir=/var \
+      -Dsystem=true \
+      -Dinit_script=systemd \
+      -Dqemu_user=qemu \
+      -Dqemu_group=qemu \
+      -Ddriver_qemu=enabled \
+      -Ddriver_libvirtd=enabled \
+      -Ddriver_remote=enabled \
+      -Ddriver_network=enabled \
+      -Ddriver_storage=enabled \
+      -Ddriver_secret=enabled \
+      -Ddriver_nodedev=enabled \
+      -Ddriver_nwfilter=enabled \
+      -Ddriver_interface=enabled \
+      -Ddriver_ch=disabled \
+      -Dstorage_dir=enabled \
+      -Dstorage_fs=enabled \
+      -Dstorage_zfs=enabled \
+      -Dstorage_lvm=disabled \
+      -Dstorage_scsi=disabled \
+      -Dstorage_mpath=disabled \
+      -Dstorage_iscsi=disabled \
+      -Dstorage_iscsi_direct=disabled \
+      -Dstorage_gluster=disabled \
+      -Dstorage_rbd=disabled \
+      -Dstorage_vstorage=disabled \
+      -Dselinux=enabled \
+      -Dsecdriver_selinux=enabled \
+      -Dfirewalld=enabled \
+      -Dfirewalld_zone=enabled \
+      -Dpolkit=enabled \
+      -Dnumactl=enabled \
+      -Dcapng=enabled \
+      -Dlibpcap=enabled \
+      -Dlibnl=enabled \
+      -Dudev=enabled \
+      -Dcurl=enabled \
+      -Dlibssh=enabled \
+      -Dlibssh2=enabled \
+      -Djson_c=enabled \
+      -Dbash_completion=enabled \
+      -Dclient_direct=enabled \
+      -Ddocs=disabled \
+      -Dtests=disabled \
+      -Dwerror=false && \
+    ninja -C build -j16 && \
+    DESTDIR=/out ninja -C build install && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/lib64/*.a /out/usr/lib/*.a /out/usr/.crates.toml /out/usr/.crates2.json && \
+    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    for bin in /out/usr/bin/*; do \
+      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
+        echo "=== NEEDED: $(basename "$bin") ==="; \
+        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+      fi; \
+    done
+
+FROM scratch AS export
+COPY --from=compiler /out/ /

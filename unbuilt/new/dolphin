@@ -1,0 +1,101 @@
+# Project Firefly: dolphin-emu (Zen3+ / AOCC 6.0 + ld.lld)
+# Fedora 44 Builder — bootc layout under /out/usr
+FROM fedora:44 AS builder
+
+RUN dnf install -y --setopt=tsflags=nodocs \
+  git \
+  ca-certificates \
+  cmake \
+  ninja-build \
+  gcc \
+  gcc-c++ \
+  libstdc++-devel \
+  libstdc++-static \
+  libquadmath \
+  libquadmath-static \
+  lld \
+  ncurses \
+  ncurses-devel \
+  pkgconf-pkg-config \
+  qt6-qtbase-devel \
+  qt6-qtbase-private-devel \
+  qt6-qtsvg-devel \
+  SDL3-devel \
+  libevdev-devel \
+  udev-devel \
+  libusb1-devel \
+  hidapi-devel \
+  libX11-devel \
+  libXi-devel \
+  libXrandr-devel \
+  mesa-libGL-devel \
+  mesa-libEGL-devel \
+  vulkan-loader-devel \
+  vulkan-headers \
+  alsa-lib-devel \
+  pulseaudio-libs-devel \
+  libao-devel \
+  openal-soft-devel \
+  cubeb-devel \
+  ffmpeg-devel \
+  curl-devel \
+  libenet-devel \
+  lzo-devel \
+  miniupnpc-devel \
+  mbedtls-devel \
+  minizip-ng-devel \
+  zlib-ng-compat-devel \
+  && dnf clean all
+
+COPY aocc-v6/aocc* /tmp/
+RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
+    rpm -ivh --nodigest --nosignature /tmp/aocc.rpm && \
+    rm -f /tmp/aocc*
+
+ENV AOCC_DIR="/opt/AMD/aocc-compiler-6.0.0"
+ENV PATH="${AOCC_DIR}/bin:${PATH}" \
+    LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LIBRARY_PATH}" \
+    LD_LIBRARY_PATH="${AOCC_DIR}/lib:${AOCC_DIR}/lib32:${LD_LIBRARY_PATH}" \
+    C_INCLUDE_PATH="${AOCC_DIR}/include:${C_INCLUDE_PATH}" \
+    CPLUS_INCLUDE_PATH="${AOCC_DIR}/include:${CPLUS_INCLUDE_PATH}"
+
+ENV CC="aoc" \
+    CXX="aoc++" \
+    LD="ld.lld" \
+    AR="llvm-ar" \
+    RANLIB="llvm-ranlib" \
+    NM="llvm-nm" \
+    STRIP="llvm-strip" \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto=full -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a"
+
+FROM builder AS compiler
+WORKDIR /build/dolphin
+
+RUN mkdir -p /out && \
+    git clone --recursive --depth 1 https://github.com/dolphin-emu/dolphin.git . && \
+    git submodule update --init --recursive && \
+    cmake -B build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr \
+      -DCMAKE_C_COMPILER=aoc \
+      -DCMAKE_CXX_COMPILER=aoc++ \
+      -DCMAKE_LINKER=ld.lld \
+      -DENABLE_TESTS=OFF && \
+    cmake --build build -j"$(nproc)" && \
+    DESTDIR=/out cmake --install build && \
+    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+    fi && \
+    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/lib64/*.a /out/usr/lib/*.a /out/usr/.crates.toml /out/usr/.crates2.json && \
+    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
+    for bin in /out/usr/bin/* /out/usr/lib64/*.so*; do \
+      if [ -f "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
+        echo "=== NEEDED: $(basename "$bin") ==="; \
+        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
+      fi; \
+    done
+
+FROM scratch AS export
+COPY --from=compiler /out/ /
