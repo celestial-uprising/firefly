@@ -2,11 +2,10 @@
 # Fedora 44 Builder
 FROM fedora:44 AS builder
 
-RUN dnf install -y --setopt=tsflags=nodocs \
+RUN dnf install -y \
   git \
   golang \
   gcc \
-  gcc-c++ \
   make \
   pkgconf-pkg-config \
   python3-devel \
@@ -34,11 +33,7 @@ RUN dnf install -y --setopt=tsflags=nodocs \
   dbus-devel \
   simde-devel \
   xxhash-devel \
-  libstdc++-devel \
-  libstdc++-static \
   libquadmath \
-  libquadmath-static \
-  lld \
   ncurses \
   && dnf clean all
 
@@ -62,17 +57,13 @@ ENV GOPATH="/go" \
     CGO_ENABLED="1" \
     CC="aoc" \
     CXX="aoc++" \
-    LD="ld.lld" \
     AR="llvm-ar" \
     RANLIB="llvm-ranlib" \
-    NM="llvm-nm" \
-    STRIP="llvm-strip" \
-    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    LDFLAGS="-fuse-ld=lld -flto=full -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a" \
-    CGO_CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CGO_CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CGO_LDFLAGS="-fuse-ld=lld -static-libstdc++ -static-libgcc -Wl,-O3,-z,opt,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a"
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -l:libamdlibm.a" \
+    CGO_CFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+    CGO_LDFLAGS="-fuse-ld=lld -l:libamdlibm.a"
 
 FROM builder AS compiler
 WORKDIR /build/kitty
@@ -83,14 +74,7 @@ RUN git clone --depth 1 https://github.com/kovidgoyal/kitty.git . && \
     if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
       mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
     fi && \
-    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/.crates.toml /out/usr/.crates2.json && \
-    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
-    for bin in /out/usr/bin/*; do \
-      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
-        echo "=== NEEDED: $(basename "$bin") ==="; \
-        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
-      fi; \
-    done
+    find /out/usr/bin /out/usr/lib*/kitty -type f \( -name "*.so" -o -executable \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

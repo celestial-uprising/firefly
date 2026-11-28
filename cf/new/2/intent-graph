@@ -1,43 +1,38 @@
 # Project Firefly: Intent-Graph
-# Fedora 44 + Zen3+ Builder (AOCC 6.0 + ld.lld + Static Runtime Preference)
+# Fedora 44 + Zen3+ Builder
 FROM fedora:44 AS builder
-
-RUN dnf install -y --setopt=tsflags=nodocs \
-  git \
-  curl \
-  ca-certificates \
-  gcc \
-  gcc-c++ \
-  pkgconf-pkg-config \
-  libstdc++-devel \
-  libstdc++-static \
-  libquadmath \
-  libquadmath-static \
-  lld \
-  make \
-  cmake \
-  ninja-build \
-  meson \
-  autoconf \
-  automake \
-  libtool \
-  bison \
-  flex \
-  gperf \
-  texinfo \
-  nasm \
-  glibc-devel \
-  glibc-static \
-  libcap-devel \
-  libseccomp-devel \
-  python \
-  python-libmount \
-  systemd-devel \
-  json-c-devel \
-  nodejs \
-  pnpm \
-  ncurses \
-  && dnf clean all
+RUN dnf install -y \
+    curl \
+    git \
+    make \
+    cmake \
+    ninja-build \
+    meson \
+    autoconf \
+    automake \
+    libtool \
+    pkgconf-pkg-config \
+    bison \
+    flex \
+    gperf \
+    texinfo \
+    nasm \
+    glibc-devel \
+    libstdc++-devel \
+    gcc \
+    git-core \
+    glibc-static \
+    libcap-devel \
+    libseccomp-devel \
+    python \
+    python-libmount \
+    systemd-devel \
+    json-c-devel \
+    libquadmath \
+    ncurses \
+    nodejs \
+    pnpm \
+    && dnf clean all
 
 COPY aocc-v6/aocc* /tmp/
 RUN cat /tmp/aocc* > /tmp/aocc.rpm && \
@@ -63,8 +58,9 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
     CARGO_BUILD_JOBS="16" \
     CARGO_INSTALL_ROOT="/out/usr" \
     CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="aoc" \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=znver3 -C link-arg=-fuse-ld=lld -C link-arg=-static-libstdc++ -C link-arg=-static-libgcc -C link-arg=-Wl,-O3,-z,opt,--gc-sections,--as-needed -C link-arg=-l:libamdlibm.a -Z threads=16" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=znver3 -C link-arg=-fuse-ld=lld -C link-arg=-l:libamdlibm.a -Z threads=16" \
     CARGO_UNSTABLE_BUILD_STD="std,panic_abort" \
+    CARGO_UNSTABLE_PANIC_IMMEDIATE_ABORT="true" \
     CARGO_UNSTABLE_PROFILE_RUSTFLAGS="true" \
     CARGO_PROFILE_RELEASE_OPT_LEVEL="3" \
     CARGO_PROFILE_RELEASE_LTO="fat" \
@@ -73,43 +69,42 @@ ENV CARGO_BUILD_TARGET="x86_64-unknown-linux-gnu" \
     CARGO_PROFILE_RELEASE_STRIP="symbols" \
     CC="aoc" \
     CXX="aoc++" \
-    LD="ld.lld" \
     AR="llvm-ar" \
     RANLIB="llvm-ranlib" \
     NM="llvm-nm" \
     STRIP="llvm-strip" \
-    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-    LDFLAGS="-fuse-ld=lld -flto=full -O3 -static-libstdc++ -static-libgcc -Wl,-O3,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a" \
+    LD="ld.lld" \
+    MAKEFLAGS="-j16" \
+    CMAKE_BUILD_PARALLEL_LEVEL="16" \
+    NINJA_STATUS="[%f/%t] " \
+    CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fveclib=AMDLIBM" \
+    CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto -zopt -fveclib=AMDLIBM" \
+    LDFLAGS="-fuse-ld=lld -flto -Wl,-O3,--gc-sections,--as-needed -l:libamdlibm.a" \
     PKG_CONFIG_PATH="/usr/lib64/pkgconfig:/usr/share/pkgconfig" \
     PKG_CONFIG_LIBDIR="/usr/lib64/pkgconfig:/usr/share/pkgconfig" \
     PKG_CONFIG_ALLOW_SYSTEM_CFLAGS="0" \
-    PKG_CONFIG_ALLOW_SYSTEM_LIBS="0"
-    CARGO_UNSTABLE_PANIC_IMMEDIATE_ABORT="true"
-    MAKEFLAGS="-j16"
-    CMAKE_BUILD_PARALLEL_LEVEL="16"
-    NINJA_STATUS="[%f/%t] "
-    LIBZ_SYS_STATIC="1"
-    LIBZSTD_NO_PKG_CONFIG="1"
-    BZIP2_SYS_STATIC="1"
-    LZMA_API_STATIC="1"
-    OPENSSL_NO_VENDOR="0"
-    OPENSSL_STATIC="1"
-    SODIUM_USE_PKG_CONFIG="0"
-    SODIUM_STATIC="1"
-    CURL_STATIC="1"
-    LIBSSH2_SYS_USE_PKG_CONFIG="0"
-    LIBGIT2_NO_PKG_CONFIG="1"
-    LIBNGHTTP2_NO_PKG_CONFIG="1"
-    SQLITE3_STATIC="1"
-    DUCKDB_STATIC="1"
-    PQ_LIB_STATIC="1"
-    RUSTONIG_SYSTEM_LIBONIG="0"
-    RUSTONIG_STATIC_LIBONIG="1"
-    SDL2_STATIC="1"
-    FREETYPE_SYS_STATIC="1"
-    HARFBUZZ_SYS_NO_PKG_CONFIG="1"
-    OPUS_STATIC="1"
+    PKG_CONFIG_ALLOW_SYSTEM_LIBS="0" \
+    LIBZ_SYS_STATIC="1" \
+    LIBZSTD_NO_PKG_CONFIG="1" \
+    BZIP2_SYS_STATIC="1" \
+    LZMA_API_STATIC="1" \
+    OPENSSL_NO_VENDOR="0" \
+    OPENSSL_STATIC="1" \
+    SODIUM_USE_PKG_CONFIG="0" \
+    SODIUM_STATIC="1" \
+    CURL_STATIC="1" \
+    LIBSSH2_SYS_USE_PKG_CONFIG="0" \
+    LIBGIT2_NO_PKG_CONFIG="1" \
+    LIBNGHTTP2_NO_PKG_CONFIG="1" \
+    SQLITE3_STATIC="1" \
+    DUCKDB_STATIC="1" \
+    PQ_LIB_STATIC="1" \
+    RUSTONIG_SYSTEM_LIBONIG="0" \
+    RUSTONIG_STATIC_LIBONIG="1" \
+    SDL2_STATIC="1" \
+    FREETYPE_SYS_STATIC="1" \
+    HARFBUZZ_SYS_NO_PKG_CONFIG="1" \
+    OPUS_STATIC="1" \
     LIBOPUS_NO_PKG_CONFIG="1"
 
 FROM builder AS compiler
@@ -126,16 +121,11 @@ RUN git clone https://github.com/mrzdevcore/intent-graph && \
       fi; \
     done && \
     if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
-      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+      cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
     fi && \
-    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/.crates.toml /out/usr/.crates2.json && \
-    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
-    for bin in /out/usr/bin/*; do \
-      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
-        echo "=== NEEDED: $(basename "$bin") ==="; \
-        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
-      fi; \
-    done
+    llvm-strip --strip-unneeded /out/usr/bin/ig 2>/dev/null || true
+
+RUN rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/lib64/*.a /out/usr/lib/*.a
 
 FROM scratch AS export
 COPY --from=compiler /out/ /

@@ -1,13 +1,12 @@
 # Project Firefly: Podman
-# Fedora 44 + Zen3+ Builder (AOCC 6.0 + ld.lld + Static Runtime Preference)
+# Fedora 44 + Zen3+ Builder
 FROM fedora:44 AS builder
 
-RUN dnf install -y --setopt=tsflags=nodocs \
+RUN dnf install -y \
   git \
   golang \
   make \
   gcc \
-  gcc-c++ \
   pkgconf-pkg-config \
   gpgme-devel \
   libassuan-devel \
@@ -18,11 +17,7 @@ RUN dnf install -y --setopt=tsflags=nodocs \
   systemd-devel \
   btrfs-progs-devel \
   go-md2man \
-  libstdc++-devel \
-  libstdc++-static \
   libquadmath \
-  libquadmath-static \
-  lld \
   ncurses \
   glibc-devel \
   sqlite-devel \
@@ -47,20 +42,14 @@ ENV GOPATH="/go" \
   CGO_ENABLED="1" \
   CC="aoc" \
   CXX="aoc++" \
-  LD="ld.lld" \
-  AR="llvm-ar" \
-  RANLIB="llvm-ranlib" \
-  NM="llvm-nm" \
-  STRIP="llvm-strip" \
-  CGO_CFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-  CGO_CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -flto=full -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
-  CGO_LDFLAGS="-fuse-ld=lld -static-libstdc++ -static-libgcc -Wl,-O3,-z,opt,--gc-sections,--as-needed,--no-fatal-warnings -l:libamdlibm.a"
+  CGO_CFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+  CGO_CXXFLAGS="-O3 -march=znver3 -mtune=znver3 -zopt -fvector-transform -fscalar-transform -floop-transform -faggressive-loop-transform -fremap-arrays -fstruct-layout=7 -fveclib=AMDLIBM" \
+  CGO_LDFLAGS="-fuse-ld=lld -l:libamdlibm.a"
 
 FROM builder AS compiler
 WORKDIR /tmp/podman-src
 
-RUN mkdir -p /out && \
-  git clone --depth 1 https://github.com/containers/podman.git . && \
+RUN git clone --depth 1 https://github.com/containers/podman.git . && \
   make BUILDTAGS="selinux seccomp systemd libsqlite3" binaries docs && \
   make BUILDTAGS="selinux seccomp systemd libsqlite3" \
     DESTDIR=/out \
@@ -70,17 +59,10 @@ RUN mkdir -p /out && \
     install.man \
     install.systemd \
     install.completions && \
-    if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
-      mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
-    fi && \
-    rm -rf /out/usr/include /out/usr/lib64/pkgconfig /out/usr/.crates.toml /out/usr/.crates2.json && \
-    find /out/usr -type f \( -executable -o -name "*.so*" \) -exec llvm-strip --strip-unneeded {} + 2>/dev/null || true && \
-    for bin in /out/usr/bin/*; do \
-      if [ -f "$bin" ] && [ -x "$bin" ] && head -c 4 "$bin" 2>/dev/null | grep -q $'\x7fELF'; then \
-        echo "=== NEEDED: $(basename "$bin") ==="; \
-        readelf -d "$bin" | awk '/NEEDED/ {print $5}' || true; \
-      fi; \
-    done
+  if [ -d /out/usr/sbin ] && [ ! -L /out/usr/sbin ]; then \
+    mkdir -p /out/usr/bin && cp -a /out/usr/sbin/. /out/usr/bin/ && rm -rf /out/usr/sbin; \
+  fi && \
+  find /out/usr -maxdepth 4
 
 FROM scratch AS export
 COPY --from=compiler /out/ /
